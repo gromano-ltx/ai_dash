@@ -87,6 +87,7 @@ class AgentRun:
     user: str | None                # human who triggered the run (git config / $USER)
     git_commits: list[str]          # commit hashes made during this run
     git_prs: list[str]              # PR URLs opened during this run
+    ticket_refs: list[str]          # ticket IDs extracted from branch/commits/prompt (e.g. "LINEAR-123", "#456")
     parent_id: str | None           # for nested trace trees
     metadata: dict                  # provider-specific extras
 ```
@@ -99,6 +100,9 @@ The JSONL transcript logs every tool call. The Claude Code adapter mines these f
 - `Bash` calls containing `git commit` → extract commit hash → `git_commits`
 - `Bash` calls containing `gh pr create` → extract PR URL → `git_prs`
 - Session username from `git config user.name` or `$USER` → `user`
+- Git branch name, commit messages, and initial prompt → regex extract ticket IDs → `ticket_refs`
+  - Patterns: `LINEAR-\d+`, `[A-Z]+-\d+` (Jira), `#\d+` (GitHub Issues)
+  - Optional: resolve to URLs if user configures their ticket system in settings
 
 ---
 
@@ -144,12 +148,12 @@ POST /api/ingest/:provider  # manual trigger to re-ingest (for dev)
 
 ### `/runs` — All Runs Table
 - TanStack Table with virtual rows (handles thousands of runs)
-- Filter by: provider, model, status, user, date range
-- Columns: label, provider, model, user, status, duration, tokens, commits, PRs, started_at
+- Filter by: provider, model, status, user, ticket, date range
+- Columns: label, provider, model, user, status, duration, tokens, ticket, commits, PRs, started_at
 
 ### `/runs/:id` — Run Detail
-- Header: user, model, duration, status badge
-- Activity timeline: task → tool calls → git commits (linked) → PRs opened (linked)
+- Header: user, model, duration, status badge, ticket chip(s) (linked to ticket system)
+- Activity timeline: ticket → task → tool calls → git commits (linked) → PRs opened (linked)
 - Trace tree: nested expand/collapse for sub-agent calls (via `parent_id`)
 - Token breakdown: input vs output, per-message if available
 - Raw metadata drawer (collapsible)
