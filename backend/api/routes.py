@@ -48,6 +48,12 @@ def list_providers(session: Session = Depends(get_session)):
     return {"providers": list({r.provider for r in runs})}
 
 
+@router.get("/users")
+def list_users(session: Session = Depends(get_session)):
+    runs = session.exec(select(AgentRun)).all()
+    return {"users": sorted({r.user for r in runs if r.user})}
+
+
 @router.get("/stats")
 def get_stats(session: Session = Depends(get_session)):
     runs = session.exec(select(AgentRun)).all()

@@ -35,6 +35,13 @@ export function useRun(id: string) {
   });
 }
 
+export function useUsers() {
+  return useQuery<{ users: string[] }>({
+    queryKey: ["users"],
+    queryFn: () => get("/users"),
+  });
+}
+
 export function useStats() {
   return useQuery<Stats>({
     queryKey: ["stats"],

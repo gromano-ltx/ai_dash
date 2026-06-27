@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRuns } from "../lib/api";
+import { useRuns, useUsers } from "../lib/api";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { useNavigate } from "react-router-dom";
@@ -21,6 +21,7 @@ export function Runs() {
   const [status, setStatus] = useState("");
   const [user, setUser] = useState("");
   const [ticket, setTicket] = useState("");
+  const { data: usersData } = useUsers();
   const { data: runs, isLoading } = useRuns({
     provider: provider || undefined,
     status: status || undefined,
@@ -52,12 +53,16 @@ export function Runs() {
             ))}
           </select>
         ))}
-        <input
-          placeholder="User"
+        <select
           value={user}
           onChange={(e) => setUser(e.target.value)}
-          className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono focus:outline-none focus:border-slate-500 w-32"
-        />
+          className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono focus:outline-none focus:border-slate-500"
+        >
+          <option value="">User</option>
+          {usersData?.users.map((u) => (
+            <option key={u} value={u}>{u}</option>
+          ))}
+        </select>
         <input
           placeholder="Ticket (e.g. LINEAR-123)"
           value={ticket}
