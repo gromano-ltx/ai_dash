@@ -54,6 +54,26 @@ def list_users(session: Session = Depends(get_session)):
     return {"users": sorted({r.user for r in runs if r.user})}
 
 
+@router.get("/daily")
+def get_daily(session: Session = Depends(get_session)):
+    from datetime import datetime, timedelta
+    runs = session.exec(select(AgentRun)).all()
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    recent = [r for r in runs if r.started_at >= cutoff]
+    days: dict[str, dict] = {}
+    for i in range(7):
+        d = (datetime.utcnow() - timedelta(days=6 - i)).strftime("%m/%d")
+        days[d] = {"date": d, "anthropic": 0, "openai": 0, "gemini": 0,
+                   "input_tokens": 0, "output_tokens": 0}
+    for r in recent:
+        d = r.started_at.strftime("%m/%d")
+        if d in days:
+            days[d][r.provider] = days[d].get(r.provider, 0) + 1
+            days[d]["input_tokens"] += r.input_tokens
+            days[d]["output_tokens"] += r.output_tokens
+    return list(days.values())
+
+
 @router.get("/stats")
 def get_stats(session: Session = Depends(get_session)):
     runs = session.exec(select(AgentRun)).all()

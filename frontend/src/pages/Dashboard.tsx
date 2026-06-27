@@ -1,7 +1,8 @@
-import { useStats, useRuns } from "../lib/api";
-import { StatusBadge } from "../components/StatusBadge";
-import { ProviderBadge } from "../components/ProviderBadge";
-import { useNavigate } from "react-router-dom";
+import { useStats, useDaily } from "../lib/api";
+import {
+  BarChart, Bar, AreaChart, Area,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+} from "recharts";
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
@@ -19,11 +20,24 @@ function fmt(n: number) {
   return String(n);
 }
 
+const PROVIDER_COLORS = {
+  anthropic: "#8b5cf6",
+  openai: "#22c55e",
+  gemini: "#3b82f6",
+};
+
+const tooltipStyle = {
+  backgroundColor: "#0f172a",
+  border: "1px solid #1e293b",
+  borderRadius: "6px",
+  color: "#cbd5e1",
+  fontSize: "12px",
+  fontFamily: "monospace",
+};
+
 export function Dashboard() {
   const { data: stats } = useStats();
-  const { data: runs } = useRuns();
-  const navigate = useNavigate();
-  const recent = runs?.slice(0, 8) ?? [];
+  const { data: daily } = useDaily();
 
   return (
     <div className="p-6 space-y-6">
@@ -50,42 +64,46 @@ export function Dashboard() {
         </div>
       ) : null}
 
-      <div>
-        <h2 className="text-sm font-mono text-slate-400 mb-3 uppercase tracking-wider">Recent Runs</h2>
-        <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="text-left px-4 py-2.5 text-xs font-mono text-slate-500 font-normal">Task</th>
-                <th className="text-left px-4 py-2.5 text-xs font-mono text-slate-500 font-normal">Provider</th>
-                <th className="text-left px-4 py-2.5 text-xs font-mono text-slate-500 font-normal">User</th>
-                <th className="text-left px-4 py-2.5 text-xs font-mono text-slate-500 font-normal">Status</th>
-                <th className="text-left px-4 py-2.5 text-xs font-mono text-slate-500 font-normal">Tokens</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recent.map((run) => (
-                <tr
-                  key={run.id}
-                  onClick={() => navigate(`/runs/${run.id}`)}
-                  className="border-b border-slate-800/50 hover:bg-slate-800/40 cursor-pointer transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <p className="text-slate-200 truncate max-w-xs">{run.label}</p>
-                    {run.ticket_refs.length > 0 && (
-                      <span className="text-xs text-slate-500 font-mono">{run.ticket_refs[0]}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3"><ProviderBadge provider={run.provider} /></td>
-                  <td className="px-4 py-3 text-slate-400 font-mono text-xs">{run.user ?? "—"}</td>
-                  <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
-                  <td className="px-4 py-3 text-slate-400 font-mono text-xs">
-                    {fmt(run.input_tokens + run.output_tokens)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-5">
+          <p className="text-xs text-slate-500 font-mono uppercase tracking-wider mb-4">Runs per day</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={daily ?? []} barSize={14} barGap={2}>
+              <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 11, fontFamily: "monospace" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#64748b", fontSize: 11, fontFamily: "monospace" }} axisLine={false} tickLine={false} allowDecimals={false} width={24} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#1e293b" }} />
+              <Legend wrapperStyle={{ fontSize: 11, fontFamily: "monospace", color: "#94a3b8", paddingTop: 8 }} />
+              <Bar dataKey="anthropic" stackId="a" fill={PROVIDER_COLORS.anthropic} radius={[0, 0, 0, 0]} />
+              <Bar dataKey="openai" stackId="a" fill={PROVIDER_COLORS.openai} radius={[0, 0, 0, 0]} />
+              <Bar dataKey="gemini" stackId="a" fill={PROVIDER_COLORS.gemini} radius={[2, 2, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-5">
+          <p className="text-xs text-slate-500 font-mono uppercase tracking-wider mb-4">Token burn</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={daily ?? []}>
+              <defs>
+                <linearGradient id="inputGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="outputGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 11, fontFamily: "monospace" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#64748b", fontSize: 11, fontFamily: "monospace" }} axisLine={false} tickLine={false} width={40}
+                tickFormatter={(v) => fmt(v)} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: "#334155" }}
+                formatter={(v: number) => [fmt(v), undefined]} />
+              <Legend wrapperStyle={{ fontSize: 11, fontFamily: "monospace", color: "#94a3b8", paddingTop: 8 }} />
+              <Area type="monotone" dataKey="input_tokens" name="input" stroke="#8b5cf6" strokeWidth={2} fill="url(#inputGrad)" dot={false} />
+              <Area type="monotone" dataKey="output_tokens" name="output" stroke="#22c55e" strokeWidth={2} fill="url(#outputGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
         </div>
       </div>
     </div>

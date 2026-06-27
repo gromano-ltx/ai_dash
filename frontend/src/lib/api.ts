@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRun, Stats } from "./types";
+import type { AgentRun, Stats, DailyBucket } from "./types";
 
 const BASE = "http://localhost:8000/api";
 
@@ -32,6 +32,14 @@ export function useRun(id: string) {
   return useQuery<AgentRun>({
     queryKey: ["run", id],
     queryFn: () => get(`/runs/${id}`),
+  });
+}
+
+export function useDaily() {
+  return useQuery<DailyBucket[]>({
+    queryKey: ["daily"],
+    queryFn: () => get("/daily"),
+    refetchInterval: 30000,
   });
 }
 

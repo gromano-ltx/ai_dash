@@ -17,6 +17,15 @@ export interface AgentRun {
   parent_id: string | null;
 }
 
+export interface DailyBucket {
+  date: string;
+  anthropic: number;
+  openai: number;
+  gemini: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
 export interface Stats {
   total_runs_7d: number;
   total_input_tokens_7d: number;
