@@ -42,7 +42,7 @@ Build a read-only observability dashboard for AI agents across three providers: 
   │                   └────────┬────────┘                      │
   │                            ▼                               │
   │                      ┌──────────┐                          │
-  │                      │  SQLite  │                          │
+  │                      │ Postgres │◄── Cloud SQL (GCP)       │
   │                      └──────────┘                          │
   │                                                             │
   │  REST API  /api/runs  /api/runs/:id  /api/providers         │
@@ -99,7 +99,7 @@ Total: one config edit + one or two env vars. No daemon, no installer, no Docker
 | Charts | Recharts | Composable, React-native, small bundle |
 | Tables | TanStack Table | Headless, high-perf virtual rows for large run lists |
 | Backend | FastAPI + Python 3.12 | Native AI SDK support, great SSE/async |
-| DB | SQLite via SQLModel | Zero-ops, portable, sufficient for local/small-team use |
+| DB | PostgreSQL via SQLModel | Cloud SQL on GCP, smallest instance (~$10/mo), fully managed |
 | Real-time | Server-Sent Events (SSE) | One-way stream from backend → frontend for live runs |
 
 ---
@@ -220,7 +220,7 @@ ai_dash/
 │   ├── models.py
 │   ├── db.py
 │   └── main.py
-├── docker-compose.yml       # single command to deploy the server
+├── cloudbuild.yaml          # GCP Cloud Build — build + deploy to Cloud Run
 └── pyproject.toml
 ```
 
@@ -236,7 +236,7 @@ ai_dash/
 6. OpenAI proxy adapter — add second provider
 7. Gemini proxy adapter — add third provider
 8. SSE live updates — new AgentRun inserted → SSE push → frontend refresh
-9. Docker Compose — package everything for one-command server deploy
+9. GCP deploy — Cloud Run service + Cloud SQL Postgres + Cloud Build pipeline
 
 ---
 
