@@ -1,8 +1,12 @@
+import json
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
-from typing import Optional
+from typing import Optional, AsyncGenerator
+from sse_starlette.sse import EventSourceResponse
 from backend.db import get_session
 from backend.models import AgentRun, AgentRunRead
+from backend import sse as sse_bus
 
 router = APIRouter()
 
@@ -59,6 +63,26 @@ def get_stats(session: Session = Depends(get_session)):
         "active_providers": list({r.provider for r in recent}),
         "running_count": sum(1 for r in runs if r.status == "running"),
     }
+
+
+@router.get("/stream")
+async def stream_runs():
+    q = sse_bus.subscribe()
+
+    async def generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30)
+                    yield {"data": json.dumps(event)}
+                except asyncio.TimeoutError:
+                    yield {"data": json.dumps({"type": "ping"})}
+        except asyncio.CancelledError:
+            pass
+        finally:
+            sse_bus.unsubscribe(q)
+
+    return EventSourceResponse(generator())
 
 
 def _to_read(run: AgentRun) -> AgentRunRead:

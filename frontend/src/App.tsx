@@ -4,21 +4,29 @@ import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
 import { Runs } from "./pages/Runs";
 import { RunDetail } from "./pages/RunDetail";
+import { useRunsStream } from "./lib/sse";
 
 const queryClient = new QueryClient();
+
+function AppRoutes() {
+  useRunsStream();
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/runs" element={<Runs />} />
+          <Route path="/runs/:id" element={<RunDetail />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
 
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/runs" element={<Runs />} />
-            <Route path="/runs/:id" element={<RunDetail />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <AppRoutes />
     </QueryClientProvider>
   );
 }
