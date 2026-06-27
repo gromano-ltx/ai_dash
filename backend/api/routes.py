@@ -88,6 +88,15 @@ def get_stats(session: Session = Depends(get_session)):
         "total_prs_7d": sum(len(r.git_prs) for r in recent),
         "active_providers": list({r.provider for r in recent}),
         "running_count": sum(1 for r in runs if r.status == "running"),
+        "by_provider": {
+            p: {
+                "runs": sum(1 for r in recent if r.provider == p),
+                "input_tokens": sum(r.input_tokens for r in recent if r.provider == p),
+                "output_tokens": sum(r.output_tokens for r in recent if r.provider == p),
+                "commits": sum(len(r.git_commits) for r in recent if r.provider == p),
+            }
+            for p in ("anthropic", "openai", "gemini")
+        },
     }
 
 

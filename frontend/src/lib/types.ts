@@ -26,6 +26,13 @@ export interface DailyBucket {
   output_tokens: number;
 }
 
+export interface ProviderStats {
+  runs: number;
+  input_tokens: number;
+  output_tokens: number;
+  commits: number;
+}
+
 export interface Stats {
   total_runs_7d: number;
   total_input_tokens_7d: number;
@@ -34,4 +41,5 @@ export interface Stats {
   total_prs_7d: number;
   active_providers: string[];
   running_count: number;
+  by_provider: Record<string, ProviderStats>;
 }
