@@ -1,0 +1,45 @@
+from datetime import datetime
+from typing import Optional
+from sqlmodel import SQLModel, Field, Column
+from sqlalchemy import JSON
+import uuid
+
+
+class AgentRun(SQLModel, table=True):
+    __tablename__ = "agent_runs"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    provider: str
+    model: str
+    status: str = "running"
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    ended_at: Optional[datetime] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    label: str = ""
+    task_description: Optional[str] = None
+    user: Optional[str] = None
+    git_commits: list = Field(default_factory=list, sa_column=Column(JSON))
+    git_prs: list = Field(default_factory=list, sa_column=Column(JSON))
+    ticket_refs: list = Field(default_factory=list, sa_column=Column(JSON))
+    parent_id: Optional[str] = None
+    meta: dict = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class AgentRunRead(SQLModel):
+    id: str
+    provider: str
+    model: str
+    status: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    input_tokens: int
+    output_tokens: int
+    label: str
+    task_description: Optional[str] = None
+    user: Optional[str] = None
+    git_commits: list = []
+    git_prs: list = []
+    ticket_refs: list = []
+    parent_id: Optional[str] = None
