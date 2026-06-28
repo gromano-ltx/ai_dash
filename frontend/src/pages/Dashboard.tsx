@@ -152,7 +152,7 @@ export function Dashboard() {
               <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} width={36}
                 tickFormatter={(v) => fmt(v)} />
               <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "#1e293b" }}
-                formatter={(v: number, name: string) => [fmt(v), name]} />
+                formatter={(v, name) => [fmt(Number(v ?? 0)), String(name)]} />
               <Bar dataKey="input"  stackId="t" fill="#8b5cf6" />
               <Bar dataKey="output" stackId="t" fill="#22c55e" radius={[3, 3, 0, 0]} />
             </BarChart>

@@ -61,11 +61,7 @@ resource "google_sql_database_instance" "main" {
       enabled = true
     }
     ip_configuration {
-      ipv4_enabled = false
-      private_network = null    # no VPC; Cloud Run uses Cloud SQL Auth Proxy
-    }
-    ip_configuration {
-      ipv4_enabled = true       # public IP for Cloud Run unix socket auth
+      ipv4_enabled = true       # Cloud Run uses Cloud SQL Auth Proxy unix socket
     }
   }
   depends_on = [google_project_service.apis]
@@ -86,7 +82,9 @@ resource "google_sql_user" "app" {
 
 resource "google_secret_manager_secret" "db_url" {
   secret_id = "ai-dash-db-url"
-  replication { auto {} }
+  replication {
+    auto {}
+  }
   depends_on = [google_project_service.apis]
 }
 
@@ -97,7 +95,9 @@ resource "google_secret_manager_secret_version" "db_url" {
 
 resource "google_secret_manager_secret" "dashboard_password" {
   secret_id = "ai-dash-dashboard-password"
-  replication { auto {} }
+  replication {
+    auto {}
+  }
   depends_on = [google_project_service.apis]
 }
 
