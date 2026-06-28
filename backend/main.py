@@ -32,12 +32,12 @@ app.add_middleware(
 
 app.include_router(router, prefix="/api")
 
-_COLLECTOR = Path(__file__).parent.parent / "collector" / "collector.py"
+_ROOT = Path(__file__).parent.parent
 
 @app.get("/collector.py")
 def serve_collector():
-    return FileResponse(_COLLECTOR, media_type="text/plain")
+    return FileResponse(_ROOT / "collector" / "collector.py", media_type="text/plain")
 
 @app.get("/install.sh")
 def serve_install():
-    return FileResponse(Path(__file__).parent.parent / "install.sh", media_type="text/plain")
+    return FileResponse(_ROOT / "install.sh", media_type="text/plain")
