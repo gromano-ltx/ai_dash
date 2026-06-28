@@ -7,4 +7,11 @@ export default defineConfig({
   optimizeDeps: {
     include: ["recharts"],
   },
+  server: {
+    proxy: {
+      "/api": "http://localhost:8000",
+      "/collector.py": "http://localhost:8000",
+      "/install.sh": "http://localhost:8000",
+    },
+  },
 })

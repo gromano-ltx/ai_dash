@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { AgentRun, Stats, DailyBucket } from "./types";
 
-const BASE = "http://localhost:8000/api";
+const BASE = "/api";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);

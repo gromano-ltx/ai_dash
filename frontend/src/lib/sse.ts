@@ -1,8 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-const BASE = "http://localhost:8000/api";
-
 export function useRunsStream() {
   const queryClient = useQueryClient();
 
@@ -11,7 +9,7 @@ export function useRunsStream() {
     let retryTimeout: ReturnType<typeof setTimeout>;
 
     function connect() {
-      es = new EventSource(`${BASE}/stream`);
+      es = new EventSource("/api/stream");
 
       es.onmessage = (e) => {
         try {

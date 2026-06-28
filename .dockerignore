@@ -1,0 +1,10 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+ai_dash.db
+frontend/node_modules
+frontend/.vite
+infra
+.git
+.env*
