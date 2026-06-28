@@ -1,7 +1,9 @@
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from backend.db import init_db
 from backend.api.routes import router
 from backend import watcher
@@ -29,3 +31,13 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
+
+_COLLECTOR = Path(__file__).parent.parent / "collector" / "collector.py"
+
+@app.get("/collector.py")
+def serve_collector():
+    return FileResponse(_COLLECTOR, media_type="text/plain")
+
+@app.get("/install.sh")
+def serve_install():
+    return FileResponse(Path(__file__).parent.parent / "install.sh", media_type="text/plain")

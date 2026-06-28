@@ -1,12 +1,14 @@
 import json
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from sqlmodel import Session, select
 from typing import Optional, AsyncGenerator
 from sse_starlette.sse import EventSourceResponse
-from backend.db import get_session
-from backend.models import AgentRun, AgentRunRead
+from backend.db import get_session, engine
+from backend.models import AgentRun, AgentRunRead, ApiKey
 from backend import sse as sse_bus
+from backend.adapters.claude_code import parse_transcript_content
+from backend.watcher import _upsert
 
 router = APIRouter()
 
@@ -98,6 +100,32 @@ def get_stats(session: Session = Depends(get_session)):
             for p in ("anthropic", "openai", "gemini")
         },
     }
+
+
+def _resolve_api_key(x_api_key: str, session: Session) -> ApiKey:
+    key = session.get(ApiKey, x_api_key)
+    if not key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return key
+
+
+@router.post("/v1/ingest")
+async def ingest_transcript(
+    request: Request,
+    x_api_key: str = Header(...),
+    session: Session = Depends(get_session),
+):
+    api_key = _resolve_api_key(x_api_key, session)
+    content = (await request.body()).decode("utf-8", errors="replace")
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Empty body")
+    run = parse_transcript_content(content)
+    if not run:
+        raise HTTPException(status_code=422, detail="Could not parse transcript")
+    run.user = api_key.user
+    _upsert(run)
+    await sse_bus.broadcast({"type": "run_updated", "id": run.id})
+    return {"id": run.id, "status": run.status}
 
 
 @router.get("/stream")

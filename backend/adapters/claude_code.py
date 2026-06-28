@@ -1,9 +1,10 @@
 import json
 import re
 import os
+import uuid
 import subprocess
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from backend.models import AgentRun
 
@@ -14,18 +15,23 @@ BASH_COMMIT_HASH_RE = re.compile(r'\b([0-9a-f]{7,40})\b')
 
 
 def parse_transcript(path: Path) -> Optional[AgentRun]:
-    events = []
     try:
-        with open(path, 'r', errors='replace') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        events.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
+        content = path.read_text(errors='replace')
+        mtime = path.stat().st_mtime
     except Exception:
         return None
+    return parse_transcript_content(content, mtime=mtime)
+
+
+def parse_transcript_content(content: str, mtime: Optional[float] = None) -> Optional[AgentRun]:
+    events = []
+    for line in content.splitlines():
+        line = line.strip()
+        if line:
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
 
     if not events:
         return None
@@ -95,13 +101,12 @@ def parse_transcript(path: Path) -> Optional[AgentRun]:
                         if GH_PR_RE.search(cmd):
                             git_prs.append(cmd[:300])
 
-    run_id = session_id or str(path.stem)
+    run_id = session_id or str(uuid.uuid4())
 
     # Determine status from file modification time
-    try:
-        file_age = datetime.now().timestamp() - path.stat().st_mtime
-        status = "running" if file_age < 300 else "done"
-    except Exception:
+    if mtime is not None:
+        status = "running" if (datetime.now().timestamp() - mtime) < 300 else "done"
+    else:
         status = "done"
 
     ended_at = last_assistant_ts if status == "done" else None

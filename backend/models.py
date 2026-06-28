@@ -3,6 +3,7 @@ from typing import Optional
 from sqlmodel import SQLModel, Field, Column
 from sqlalchemy import JSON
 import uuid
+import secrets
 
 
 class AgentRun(SQLModel, table=True):
@@ -24,6 +25,16 @@ class AgentRun(SQLModel, table=True):
     ticket_refs: list = Field(default_factory=list, sa_column=Column(JSON))
     parent_id: Optional[str] = None
     meta: dict = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class ApiKey(SQLModel, table=True):
+    __tablename__ = "api_keys"
+    key: str = Field(
+        default_factory=lambda: f"adk_{secrets.token_urlsafe(32)}",
+        primary_key=True,
+    )
+    user: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class AgentRunRead(SQLModel):

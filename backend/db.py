@@ -17,8 +17,13 @@ def get_session():
 
 
 def _seed():
-    from backend.models import AgentRun
+    from backend.models import AgentRun, ApiKey
     with Session(engine) as session:
+        if not session.exec(select(ApiKey)).first():
+            key = ApiKey(key="adk_devkey_local", user="local")
+            session.add(key)
+            session.commit()
+            print(f"[db] dev API key: adk_devkey_local")
         if session.exec(select(AgentRun)).first():
             return
         now = datetime.utcnow()
