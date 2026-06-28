@@ -1,20 +1,9 @@
 import { useState } from "react";
 import { useRuns, useUsers } from "../lib/api";
+import { fmt, duration } from "../lib/format";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { useNavigate } from "react-router-dom";
-
-function fmt(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-function duration(secs: number | null) {
-  if (!secs) return "—";
-  if (secs < 60) return `${Math.round(secs)}s`;
-  return `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`;
-}
 
 export function Runs() {
   const [provider, setProvider] = useState("");

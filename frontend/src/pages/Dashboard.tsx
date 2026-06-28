@@ -1,14 +1,9 @@
 import { useStats, useDaily } from "../lib/api";
+import { fmt } from "../lib/format";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from "recharts";
-
-function fmt(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
 
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: "#8b5cf6",

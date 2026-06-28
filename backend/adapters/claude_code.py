@@ -11,7 +11,6 @@ from backend.models import AgentRun
 TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d+)\b|#(\d+)\b')
 GIT_COMMIT_RE = re.compile(r'git commit')
 GH_PR_RE = re.compile(r'gh pr create')
-BASH_COMMIT_HASH_RE = re.compile(r'\b([0-9a-f]{7,40})\b')
 
 
 def parse_transcript(path: Path) -> Optional[AgentRun]:
@@ -105,7 +104,7 @@ def parse_transcript_content(content: str, mtime: Optional[float] = None) -> Opt
 
     # Determine status from file modification time
     if mtime is not None:
-        status = "running" if (datetime.now().timestamp() - mtime) < 300 else "done"
+        status = "running" if (datetime.utcnow().timestamp() - mtime) < 300 else "done"
     else:
         status = "done"
 

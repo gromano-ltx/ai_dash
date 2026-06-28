@@ -8,7 +8,8 @@ from backend import sse
 
 
 async def watch() -> None:
-    _upsert_all(scan_all_transcripts())
+    for run in scan_all_transcripts():
+        _upsert(run)
 
     base = Path.home() / ".claude" / "projects"
     if not base.exists():
@@ -27,11 +28,6 @@ async def watch() -> None:
         raise
     except Exception as exc:
         print(f"[watcher] error: {exc}")
-
-
-def _upsert_all(runs: list[AgentRun]) -> None:
-    for run in runs:
-        _upsert(run)
 
 
 def _upsert(run: AgentRun) -> None:

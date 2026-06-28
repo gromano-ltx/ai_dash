@@ -1,14 +1,18 @@
 import json
 import asyncio
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from sqlmodel import Session, select
-from typing import Optional, AsyncGenerator
+from typing import Optional
 from sse_starlette.sse import EventSourceResponse
 from backend.db import get_session
 from backend.models import AgentRun, AgentRunRead, ApiKey
 from backend import sse as sse_bus
 from backend.adapters.claude_code import parse_transcript_content
 from backend.watcher import _upsert
+
+PROVIDERS = ("anthropic", "openai", "gemini")
+MAX_INGEST_BYTES = 10 * 1024 * 1024  # 10 MB
 
 router = APIRouter()
 
@@ -30,9 +34,12 @@ def list_runs(
         query = query.where(AgentRun.status == status)
     if user:
         query = query.where(AgentRun.user == user)
-    runs = session.exec(query.offset(offset).limit(limit)).all()
     if ticket:
-        runs = [r for r in runs if ticket in r.ticket_refs]
+        # ticket_refs is JSON; filter in Python before applying limit
+        runs = [r for r in session.exec(query).all() if ticket in r.ticket_refs]
+        runs = runs[offset: offset + limit]
+    else:
+        runs = session.exec(query.offset(offset).limit(limit)).all()
     return [_to_read(r) for r in runs]
 
 
@@ -58,7 +65,6 @@ def list_users(session: Session = Depends(get_session)):
 
 @router.get("/daily")
 def get_daily(session: Session = Depends(get_session)):
-    from datetime import datetime, timedelta
     runs = session.exec(select(AgentRun)).all()
     cutoff = datetime.utcnow() - timedelta(days=7)
     recent = [r for r in runs if r.started_at >= cutoff]
@@ -79,7 +85,6 @@ def get_daily(session: Session = Depends(get_session)):
 @router.get("/stats")
 def get_stats(session: Session = Depends(get_session)):
     runs = session.exec(select(AgentRun)).all()
-    from datetime import datetime, timedelta
     cutoff = datetime.utcnow() - timedelta(days=7)
     recent = [r for r in runs if r.started_at >= cutoff]
     return {
@@ -97,7 +102,7 @@ def get_stats(session: Session = Depends(get_session)):
                 "output_tokens": sum(r.output_tokens for r in recent if r.provider == p),
                 "commits": sum(len(r.git_commits) for r in recent if r.provider == p),
             }
-            for p in ("anthropic", "openai", "gemini")
+            for p in PROVIDERS
         },
     }
 
@@ -111,7 +116,10 @@ async def ingest_transcript(
     api_key = session.get(ApiKey, x_api_key)
     if not api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    content = (await request.body()).decode("utf-8", errors="replace")
+    body = await request.body()
+    if len(body) > MAX_INGEST_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
+    content = body.decode("utf-8", errors="replace")
     if not content.strip():
         raise HTTPException(status_code=400, detail="Empty body")
     run = parse_transcript_content(content)

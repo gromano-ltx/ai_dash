@@ -20,9 +20,9 @@ class AgentRun(SQLModel, table=True):
     label: str = ""
     task_description: Optional[str] = None
     user: Optional[str] = None
-    git_commits: list = Field(default_factory=list, sa_column=Column(JSON))
-    git_prs: list = Field(default_factory=list, sa_column=Column(JSON))
-    ticket_refs: list = Field(default_factory=list, sa_column=Column(JSON))
+    git_commits: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    git_prs: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    ticket_refs: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     parent_id: Optional[str] = None
     meta: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
@@ -50,7 +50,7 @@ class AgentRunRead(SQLModel):
     label: str
     task_description: Optional[str] = None
     user: Optional[str] = None
-    git_commits: list = []
-    git_prs: list = []
-    ticket_refs: list = []
+    git_commits: list[str] = Field(default_factory=list)
+    git_prs: list[str] = Field(default_factory=list)
+    ticket_refs: list[str] = Field(default_factory=list)
     parent_id: Optional[str] = None
