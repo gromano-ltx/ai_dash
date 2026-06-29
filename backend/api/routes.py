@@ -126,9 +126,10 @@ async def ingest_transcript(
     if not run:
         raise HTTPException(status_code=422, detail="Could not parse transcript")
     run.user = api_key.user
+    run_id, run_status = run.id, run.status
     _upsert(run)
-    await sse_bus.broadcast({"type": "run_updated", "id": run.id})
-    return {"id": run.id, "status": run.status}
+    await sse_bus.broadcast({"type": "run_updated", "id": run_id})
+    return {"id": run_id, "status": run_status}
 
 
 @router.get("/stream")

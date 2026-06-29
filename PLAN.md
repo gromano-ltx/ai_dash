@@ -4,40 +4,39 @@
 
 Build a read-only observability dashboard for AI agents across three providers: Claude Code (Anthropic), OpenAI, and Gemini. The dashboard surfaces run history, activity timelines (ticket → task → commits → PRs), trace trees, and token usage in a fast React UI. No control-plane features for now — pure observability.
 
-**Design principle**: zero local installation on team members' machines. Data flows to the central server via a remote MCP server (Claude Code) and a network proxy (OpenAI/Gemini). Each team member sets up in under 2 minutes with a config edit and one env var.
+**Original design principle**: zero local installation on team members' machines via remote MCP server + network proxies.
+
+**As built (v1)**: lightweight local collector daemon reads Claude Code JSONL transcripts and ships them via REST API. MCP/proxy approach deferred to v2.
 
 ---
 
 ## Architecture Diagram
 
+### As built (v1)
+
 ```
-  Team member machines (zero daemons, zero installers)
+  Developer machine
   ┌──────────────────────────────────────────────────┐
   │                                                  │
   │  Claude Code CLI                                 │
-  │  ~/.claude/settings.json → MCP server URL        │
-  │  (CC streams events to remote MCP during session)│
+  │  writes ~/.claude/projects/*.jsonl               │
   │                          │                       │
-  │  OpenAI / Codex CLI      │                       │
-  │  OPENAI_BASE_URL=:8001   │                       │
-  │                │         │                       │
-  │  Gemini CLI    │         │                       │
-  │  GOOGLE_API_ENDPOINT=:8002                       │
-  │                │         │                       │
-  └────────────────┼─────────┼───────────────────────┘
-                   │         │
-                   ▼         ▼
+  │  collector daemon        │                       │
+  │  (~/.ai_dash/config.json)│                       │
+  │  watches + ships via     │                       │
+  │  POST /api/v1/ingest ────┘                       │
+  │                                                  │
+  └──────────────────────┬───────────────────────────┘
+                         │  HTTPS + X-API-Key
+                         ▼
   ┌─────────────────────────────────────────────────────────────┐
-  │                   CENTRAL SERVER                            │
+  │          CENTRAL SERVER (Cloud Run, GCP)                    │
   │                                                             │
-  │  ┌──────────────┐  ┌─────────────────┐  ┌───────────────┐  │
-  │  │  MCP Server  │  │  OpenAI Proxy   │  │ Gemini Proxy  │  │
-  │  │  /mcp        │  │  :8001          │  │ :8002         │  │
-  │  └──────┬───────┘  └────────┬────────┘  └───────┬───────┘  │
-  │         └──────────────────┼───────────────────┘           │
+  │  POST /api/v1/ingest  ← collector ships JSONL               │
+  │                            │                               │
+  │                   parse_transcript()                        │
   │                            ▼                               │
   │                   ┌─────────────────┐                      │
-  │                   │  Unified Schema │                      │
   │                   │    AgentRun     │                      │
   │                   └────────┬────────┘                      │
   │                            ▼                               │
@@ -45,47 +44,50 @@ Build a read-only observability dashboard for AI agents across three providers: 
   │                      │ Postgres │◄── Cloud SQL (GCP)       │
   │                      └──────────┘                          │
   │                                                             │
-  │  REST API  /api/runs  /api/runs/:id  /api/providers         │
-  │  SSE       /api/stream  (live push on new runs)             │
+  │  GET /api/runs  /api/stats  /api/daily  /api/providers      │
+  │  SSE /api/stream  (live push on new runs)                   │
   └──────────────────────────┬──────────────────────────────────┘
                              │  REST + SSE
                              ▼
   ┌─────────────────────────────────────────────────────────────┐
-  │                   REACT FRONTEND (Vite)                     │
+  │        REACT FRONTEND (served from same Cloud Run)          │
   │                                                             │
-  │  /              Overview — cards, sparklines, recent runs   │
+  │  /              Overview — cards, charts, provider breakdown │
   │  /runs          All runs table — filter by user/provider    │
   │  /runs/:id      Run detail — timeline, trace tree, tokens   │
   └─────────────────────────────────────────────────────────────┘
+
+  DNS: dash.ai-coordinator.io → Cloudflare Worker → Cloud Run URL
+```
+
+### Original design (v2 target)
+
+```
+  Team member machines (zero daemons, zero installers)
+  ┌──────────────────────────────────────────────────┐
+  │  Claude Code CLI → MCP server URL (remote)       │
+  │  OpenAI CLI      → OPENAI_BASE_URL=:8001         │
+  │  Gemini CLI      → GOOGLE_API_ENDPOINT=:8002     │
+  └──────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Team Onboarding (per member)
+## Collector Setup (current v1)
 
-**Claude Code** — edit `~/.claude/settings.json`:
+Create `~/.ai_dash/config.json`:
 ```json
-{
-  "mcpServers": {
-    "ai-dash": {
-      "url": "http://your-server/mcp",
-      "apiKey": "user-api-key"
-    }
-  }
-}
+{"url": "https://dash.ai-coordinator.io", "key": "your-api-key"}
 ```
 
-**OpenAI / Codex CLI** — add to shell profile:
+Run the collector:
 ```bash
-export OPENAI_BASE_URL=http://your-server:8001
+python -m collector.collector
 ```
 
-**Gemini** — add to shell profile:
-```bash
-export GOOGLE_API_ENDPOINT=http://your-server:8002
-```
+Or install as a background service via `install.sh` (launchd on macOS, systemd on Linux).
 
-Total: one config edit + one or two env vars. No daemon, no installer, no Docker on their machine.
+The collector watches `~/.claude/projects/*.jsonl`, detects changes, and ships updated files to the server. State is tracked in `~/.ai_dash/state.json` to avoid re-shipping unchanged files.
 
 ---
 
@@ -142,22 +144,18 @@ Claude Code streams events to the MCP server during each session. The MCP adapte
 
 ## Server-Side Adapters
 
-1. **Claude Code MCP adapter** (`backend/adapters/claude_code.py`)
-   - Implements the MCP server protocol at `/mcp`
-   - Receives streaming events from Claude Code sessions over HTTP
-   - Extracts tool calls, token usage, git activity, ticket refs → `AgentRun`
-   - Replaces the file-watcher approach entirely — no local file access needed
+1. **Claude Code adapter** (`backend/adapters/claude_code.py`) — **built**
+   - Parses Claude Code JSONL transcript files
+   - Extracts tool calls, token usage, git commits/PRs, ticket refs → `AgentRun`
+   - Called by the ingest endpoint when collector ships a transcript
 
-2. **OpenAI / Codex CLI proxy** (`backend/adapters/openai.py`)
-   - Transparent HTTPS proxy on `:8001`
-   - Intercepts requests/responses, extracts model + tokens + prompt → `AgentRun`
-   - Forwards request to real OpenAI API unmodified
+2. **OpenAI proxy** (`backend/adapters/openai.py`) — **not yet built**
+   - Planned: transparent HTTPS proxy on `:8001`
 
-3. **Gemini proxy** (`backend/adapters/gemini.py`)
-   - Transparent HTTPS proxy on `:8002`
-   - Maps `GenerateContent` requests/responses to `AgentRun`
+3. **Gemini proxy** (`backend/adapters/gemini.py`) — **not yet built**
+   - Planned: transparent HTTPS proxy on `:8002`
 
-> **Out of scope for v1**: All desktop apps (Claude, Gemini), mobile apps — deferred to v2.
+> **Out of scope for v1**: MCP server, OpenAI/Gemini proxies, desktop apps, mobile apps.
 
 ---
 
@@ -165,11 +163,15 @@ Claude Code streams events to the MCP server during each session. The MCP adapte
 
 ```
 GET  /api/runs              # paginated list, filterable by provider/status/user/ticket/date
-GET  /api/runs/:id          # single run detail + trace children
-GET  /api/runs/:id/trace    # full nested trace tree
-GET  /api/providers         # which providers are configured
+GET  /api/runs/:id          # single run detail
+GET  /api/stats             # 7-day summary (runs, tokens, commits, PRs, by provider)
+GET  /api/daily             # per-day breakdown for charts
+GET  /api/providers         # active providers
+GET  /api/users             # users seen in runs
 GET  /api/stream            # SSE stream of live run events
-POST /mcp                   # MCP server endpoint (Claude Code connects here)
+POST /api/v1/ingest         # collector ships raw JSONL transcript here
+GET  /collector.py          # collector script download
+GET  /install.sh            # one-command install script
 ```
 
 ---
@@ -228,15 +230,19 @@ ai_dash/
 
 ## Build Order
 
-1. Backend foundation — FastAPI app, SQLite schema, `/api/runs` stub with mock data
-2. Frontend shell — Vite setup, Tailwind, routing, layout, connect to mock API
-3. MCP server adapter — receive CC events, parse into AgentRun, persist to DB
-4. Dashboard + Runs pages — wire real data end-to-end
-5. Trace tree — `parent_id` linkage + nested UI component
-6. OpenAI proxy adapter — add second provider
-7. Gemini proxy adapter — add third provider
-8. SSE live updates — new AgentRun inserted → SSE push → frontend refresh
-9. GCP deploy — Cloud Run service + Cloud SQL Postgres + Cloud Build pipeline
+1. ✅ Backend foundation — FastAPI app, Postgres schema, `/api/runs` with seed data
+2. ✅ Frontend shell — Vite + Tailwind + routing + layout
+3. ✅ Claude Code adapter — parse JSONL transcripts → AgentRun
+4. ✅ Dashboard + Runs pages — wired to real data
+5. ✅ SSE live updates — ingest → SSE push → frontend refresh
+6. ✅ GCP deploy — Terraform → Cloud Run + Cloud SQL + Artifact Registry + Secret Manager
+7. ✅ Custom domain — `dash.ai-coordinator.io` via Cloudflare Worker
+8. ✅ Collector daemon — ships local transcripts to live server
+9. ⬜ Trace tree — `parent_id` linkage + nested expand/collapse UI
+10. ⬜ OpenAI adapter — proxy or SDK integration
+11. ⬜ Gemini adapter — proxy or SDK integration
+12. ⬜ Multi-user isolation — per-user data visibility
+13. ⬜ API key management UI — currently seeded manually
 
 ---
 
