@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useRuns, useUsers } from "../lib/api";
+import { useActiveUser } from "../lib/UserContext";
 import { fmt, duration } from "../lib/format";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
@@ -11,10 +12,11 @@ export function Runs() {
   const [user, setUser] = useState("");
   const [ticket, setTicket] = useState("");
   const { data: usersData } = useUsers();
+  const { user: globalUser } = useActiveUser();
   const { data: runs, isLoading } = useRuns({
     provider: provider || undefined,
     status: status || undefined,
-    user: user || undefined,
+    user: user || globalUser || undefined,
     ticket: ticket || undefined,
   });
   const navigate = useNavigate();

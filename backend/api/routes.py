@@ -1,3 +1,4 @@
+import gzip
 import json
 import asyncio
 from datetime import datetime, timedelta
@@ -6,13 +7,14 @@ from sqlmodel import Session, select
 from typing import Optional
 from sse_starlette.sse import EventSourceResponse
 from backend.db import get_session
-from backend.models import AgentRun, AgentRunRead, ApiKey
+from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore
 from backend import sse as sse_bus
 from backend.adapters.claude_code import parse_transcript_content
 from backend.watcher import _upsert
 
 PROVIDERS = ("anthropic", "openai", "gemini")
-MAX_INGEST_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_COMPRESSED_BYTES = 10 * 1024 * 1024   # 10 MB compressed
+MAX_INGEST_BYTES = 100 * 1024 * 1024      # 100 MB decompressed
 
 router = APIRouter()
 
@@ -23,6 +25,8 @@ def list_runs(
     status: Optional[str] = None,
     user: Optional[str] = None,
     ticket: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    include_children: bool = False,
     limit: int = Query(50, le=500),
     offset: int = 0,
     session: Session = Depends(get_session),
@@ -34,8 +38,12 @@ def list_runs(
         query = query.where(AgentRun.status == status)
     if user:
         query = query.where(AgentRun.user == user)
+    if parent_id is not None:
+        query = query.where(AgentRun.parent_id == parent_id)
+    elif not include_children:
+        # Hide subagent runs by default — they appear in the trace tree of their parent
+        query = query.where(AgentRun.parent_id == None)  # noqa: E711
     if ticket:
-        # ticket_refs is JSON; filter in Python before applying limit
         runs = [r for r in session.exec(query).all() if ticket in r.ticket_refs]
         runs = runs[offset: offset + limit]
     else:
@@ -64,10 +72,12 @@ def list_users(session: Session = Depends(get_session)):
 
 
 @router.get("/daily")
-def get_daily(session: Session = Depends(get_session)):
+def get_daily(user: Optional[str] = None, session: Session = Depends(get_session)):
     runs = session.exec(select(AgentRun)).all()
     cutoff = datetime.utcnow() - timedelta(days=7)
     recent = [r for r in runs if r.started_at >= cutoff]
+    if user:
+        recent = [r for r in recent if r.user == user]
     days: dict[str, dict] = {}
     for i in range(7):
         d = (datetime.utcnow() - timedelta(days=6 - i)).strftime("%m/%d")
@@ -83,10 +93,13 @@ def get_daily(session: Session = Depends(get_session)):
 
 
 @router.get("/stats")
-def get_stats(session: Session = Depends(get_session)):
+def get_stats(user: Optional[str] = None, session: Session = Depends(get_session)):
     runs = session.exec(select(AgentRun)).all()
     cutoff = datetime.utcnow() - timedelta(days=7)
     recent = [r for r in runs if r.started_at >= cutoff]
+    if user:
+        runs = [r for r in runs if r.user == user]
+        recent = [r for r in recent if r.user == user]
     return {
         "total_runs_7d": len(recent),
         "total_input_tokens_7d": sum(r.input_tokens for r in recent),
@@ -107,22 +120,85 @@ def get_stats(session: Session = Depends(get_session)):
     }
 
 
+@router.get("/keys")
+def list_keys(session: Session = Depends(get_session)):
+    keys = session.exec(select(ApiKey).order_by(ApiKey.created_at.desc())).all()
+    return [
+        {"key_prefix": k.key[:12] + "…", "user": k.user, "created_at": k.created_at}
+        for k in keys
+    ]
+
+
+@router.post("/keys", status_code=201)
+def create_key(body: dict, session: Session = Depends(get_session)):
+    user = (body.get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=422, detail="user is required")
+    key = ApiKey(user=user)
+    session.add(key)
+    session.commit()
+    session.refresh(key)
+    return {"key": key.key, "user": key.user, "created_at": key.created_at}
+
+
+@router.delete("/keys/{key_prefix}")
+def delete_key(key_prefix: str, session: Session = Depends(get_session)):
+    keys = session.exec(select(ApiKey)).all()
+    match = next((k for k in keys if k.key.startswith(key_prefix)), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="Key not found")
+    session.delete(match)
+    session.commit()
+    return {"deleted": True}
+
+
 @router.post("/v1/ingest")
 async def ingest_transcript(
     request: Request,
     x_api_key: str = Header(...),
+    x_session_id: Optional[str] = Header(None),
+    x_file_offset: int = Header(0),
+    x_file_mtime: Optional[float] = Header(None),
     session: Session = Depends(get_session),
 ):
     api_key = session.get(ApiKey, x_api_key)
     if not api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
     body = await request.body()
-    if len(body) > MAX_INGEST_BYTES:
+    if len(body) > MAX_COMPRESSED_BYTES:
         raise HTTPException(status_code=413, detail="Payload too large")
-    content = body.decode("utf-8", errors="replace")
+
+    if request.headers.get("content-encoding", "").lower() == "gzip":
+        try:
+            body = gzip.decompress(body)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid gzip content")
+        if len(body) > MAX_INGEST_BYTES:
+            raise HTTPException(status_code=413, detail="Decompressed payload too large")
+
+    new_content = body.decode("utf-8", errors="replace")
+
+    if x_session_id and x_file_offset > 0:
+        stored = session.get(TranscriptStore, x_session_id)
+        if not stored:
+            raise HTTPException(status_code=400, detail="Session state not found. Resend from offset 0.")
+        content = stored.content + new_content
+    else:
+        content = new_content
+
     if not content.strip():
         raise HTTPException(status_code=400, detail="Empty body")
-    run = parse_transcript_content(content)
+
+    if x_session_id:
+        stored = session.get(TranscriptStore, x_session_id)
+        if stored:
+            stored.content = content
+        else:
+            stored = TranscriptStore(session_id=x_session_id, content=content)
+        session.add(stored)
+        session.commit()
+
+    run = parse_transcript_content(content, mtime=x_file_mtime)
     if not run:
         raise HTTPException(status_code=422, detail="Could not parse transcript")
     run.user = api_key.user

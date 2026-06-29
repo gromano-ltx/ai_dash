@@ -4,7 +4,9 @@ import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
 import { Runs } from "./pages/Runs";
 import { RunDetail } from "./pages/RunDetail";
+import { Settings } from "./pages/Settings";
 import { useRunsStream } from "./lib/sse";
+import { UserProvider } from "./lib/UserContext";
 
 const queryClient = new QueryClient();
 
@@ -17,6 +19,7 @@ function AppRoutes() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="/runs/:id" element={<RunDetail />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
     </BrowserRouter>
@@ -26,7 +29,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppRoutes />
+      <UserProvider>
+        <AppRoutes />
+      </UserProvider>
     </QueryClientProvider>
   );
 }

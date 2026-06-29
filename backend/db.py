@@ -17,13 +17,30 @@ def get_session():
 
 
 def _seed():
+    from sqlalchemy import text
     from backend.models import AgentRun, ApiKey
     with Session(engine) as session:
         if not session.exec(select(ApiKey)).first():
-            key = ApiKey(key="adk_devkey_local", user="local")
+            key = ApiKey(key="adk_devkey_local", user="Gabby")
             session.add(key)
             session.commit()
             print(f"[db] dev API key: adk_devkey_local")
+        else:
+            # Fix user="local" → "Gabby" from initial deploy
+            rows = session.exec(text("UPDATE api_keys SET \"user\"='Gabby' WHERE \"user\"='local'"))
+            runs = session.exec(text("UPDATE agent_runs SET \"user\"='Gabby' WHERE \"user\"='local'"))
+            session.commit()
+            if runs.rowcount:
+                print(f"[db] migrated {runs.rowcount} runs: user='local' → 'Gabby'")
+            # Remove subagent stub sessions: zero-token noise and system-prompt-labeled sub-agents
+            deleted = session.exec(text(
+                "DELETE FROM agent_runs WHERE "
+                "(input_tokens + output_tokens < 10) OR "
+                "(label LIKE 'You are %')"
+            ))
+            session.commit()
+            if deleted.rowcount:
+                print(f"[db] cleaned up {deleted.rowcount} subagent/stub sessions")
         if session.exec(select(AgentRun)).first():
             return
         now = datetime.utcnow()

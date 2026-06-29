@@ -27,6 +27,12 @@ class AgentRun(SQLModel, table=True):
     meta: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
 
+class TranscriptStore(SQLModel, table=True):
+    __tablename__ = "transcript_store"
+    session_id: str = Field(primary_key=True)
+    content: str = Field(default="")
+
+
 class ApiKey(SQLModel, table=True):
     __tablename__ = "api_keys"
     key: str = Field(

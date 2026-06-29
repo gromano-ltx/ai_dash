@@ -35,10 +35,18 @@ export function useRun(id: string) {
   });
 }
 
-export function useDaily() {
+export function useRunChildren(parentId: string) {
+  return useQuery<AgentRun[]>({
+    queryKey: ["run-children", parentId],
+    queryFn: () => get(`/runs?parent_id=${parentId}`),
+  });
+}
+
+export function useDaily(user?: string) {
+  const qs = user ? `?user=${encodeURIComponent(user)}` : "";
   return useQuery<DailyBucket[]>({
-    queryKey: ["daily"],
-    queryFn: () => get("/daily"),
+    queryKey: ["daily", user],
+    queryFn: () => get(`/daily${qs}`),
     refetchInterval: 30000,
   });
 }
@@ -50,10 +58,11 @@ export function useUsers() {
   });
 }
 
-export function useStats() {
+export function useStats(user?: string) {
+  const qs = user ? `?user=${encodeURIComponent(user)}` : "";
   return useQuery<Stats>({
-    queryKey: ["stats"],
-    queryFn: () => get("/stats"),
+    queryKey: ["stats", user],
+    queryFn: () => get(`/stats${qs}`),
     refetchInterval: 10000,
   });
 }

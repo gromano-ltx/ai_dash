@@ -1,16 +1,22 @@
 substitutions:
   _REGION: us-central1
   _SERVICE: ai-dash
-  _IMAGE: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app
+  _TAG: latest
 
 steps:
   - id: build
     name: gcr.io/cloud-builders/docker
-    args: [build, -t, "${_IMAGE}:${SHORT_SHA}", -t, "${_IMAGE}:latest", .]
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app:${_TAG}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app:latest
+      - .
 
   - id: push
     name: gcr.io/cloud-builders/docker
-    args: [push, --all-tags, "${_IMAGE}"]
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app"]
 
   - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
@@ -19,9 +25,9 @@ steps:
       - run
       - deploy
       - ${_SERVICE}
-      - --image=${_IMAGE}:${SHORT_SHA}
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app:${_TAG}
       - --region=${_REGION}
       - --platform=managed
 
 images:
-  - ${_IMAGE}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app:${_TAG}

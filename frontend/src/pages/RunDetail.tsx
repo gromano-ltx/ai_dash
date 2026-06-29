@@ -1,5 +1,6 @@
-import { useParams, useNavigate } from "react-router-dom";
-import { useRun } from "../lib/api";
+import { useState } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { useRun, useRunChildren } from "../lib/api";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { fmt, duration } from "../lib/format";
@@ -8,6 +9,8 @@ export function RunDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: run, isLoading } = useRun(id!);
+  const { data: children } = useRunChildren(id!);
+  const [subAgentsOpen, setSubAgentsOpen] = useState(true);
 
   if (isLoading) return <div className="p-6 text-slate-500 font-mono text-sm">loading…</div>;
   if (!run) return <div className="p-6 text-slate-500 font-mono text-sm">run not found</div>;
@@ -67,6 +70,36 @@ export function RunDetail() {
           )}
         </div>
       </div>
+
+      {children && children.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-3">
+          <button
+            onClick={() => setSubAgentsOpen((o) => !o)}
+            className="flex items-center gap-2 w-full text-left"
+          >
+            <p className="text-xs text-slate-500 font-mono uppercase tracking-wider">
+              Sub-agents ({children.length})
+            </p>
+            <span className="text-slate-500 text-xs ml-auto">{subAgentsOpen ? "▲" : "▼"}</span>
+          </button>
+          {subAgentsOpen && (
+            <div className="space-y-2">
+              {children.map((child) => (
+                <Link
+                  key={child.id}
+                  to={`/runs/${child.id}`}
+                  className="flex items-center gap-3 p-2 rounded border border-slate-700 hover:border-slate-600 hover:bg-slate-800 transition-colors"
+                >
+                  <StatusBadge status={child.status} />
+                  <span className="text-sm text-slate-300 truncate flex-1 font-mono">{child.label}</span>
+                  <span className="text-xs text-slate-500 font-mono shrink-0">{fmt(child.input_tokens + child.output_tokens)} tok</span>
+                  <span className="text-xs text-slate-500 font-mono shrink-0">{duration(child.duration_seconds)}</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
         <p className="text-xs text-slate-500 font-mono uppercase tracking-wider mb-3">Tokens</p>

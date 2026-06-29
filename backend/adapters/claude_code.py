@@ -13,16 +13,12 @@ GIT_COMMIT_RE = re.compile(r'git commit')
 GH_PR_RE = re.compile(r'gh pr create')
 
 
-def parse_transcript(path: Path) -> Optional[AgentRun]:
-    try:
-        content = path.read_text(errors='replace')
-        mtime = path.stat().st_mtime
-    except Exception:
-        return None
-    return parse_transcript_content(content, mtime=mtime)
-
-
-def parse_transcript_content(content: str, mtime: Optional[float] = None) -> Optional[AgentRun]:
+def parse_transcript_content(
+    content: str,
+    mtime: Optional[float] = None,
+    parent_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+) -> Optional[AgentRun]:
     events = []
     for line in content.splitlines():
         line = line.strip()
@@ -49,6 +45,13 @@ def parse_transcript_content(content: str, mtime: Optional[float] = None) -> Opt
     seen_request_ids: set[str] = set()
     input_tokens = 0
     output_tokens = 0
+
+    # Extract agentId and parent linkage from first event if not provided by caller
+    if not agent_id and events:
+        agent_id = events[0].get('agentId')
+    if not parent_id and agent_id and events:
+        # In subagent transcripts, sessionId is the parent session's ID
+        parent_id = events[0].get('sessionId')
 
     for event in events:
         etype = event.get('type')
@@ -100,9 +103,9 @@ def parse_transcript_content(content: str, mtime: Optional[float] = None) -> Opt
                         if GH_PR_RE.search(cmd):
                             git_prs.append(cmd[:300])
 
-    run_id = session_id or str(uuid.uuid4())
+    # Subagent transcripts share sessionId with the parent — use agentId to avoid collision
+    run_id = (f"agent-{agent_id}" if agent_id else None) or session_id or str(uuid.uuid4())
 
-    # Determine status from file modification time
     if mtime is not None:
         status = "running" if (datetime.utcnow().timestamp() - mtime) < 300 else "done"
     else:
@@ -110,7 +113,6 @@ def parse_transcript_content(content: str, mtime: Optional[float] = None) -> Opt
 
     ended_at = last_assistant_ts if status == "done" else None
 
-    # Extract ticket refs from branch + task + label
     search_text = ' '.join(filter(None, [git_branch, first_user_text, label]))
     ticket_refs = _extract_tickets(search_text)
 
@@ -129,6 +131,7 @@ def parse_transcript_content(content: str, mtime: Optional[float] = None) -> Opt
         git_commits=list(dict.fromkeys(git_commits)),
         git_prs=list(dict.fromkeys(git_prs)),
         ticket_refs=ticket_refs,
+        parent_id=parent_id,
         meta={"git_branch": git_branch, "cwd": cwd},
     )
 
@@ -173,6 +176,25 @@ def _get_user() -> str:
     except Exception:
         pass
     return os.environ.get('USER', 'unknown')
+
+
+def parse_transcript(path: Path) -> Optional[AgentRun]:
+    try:
+        content = path.read_text(errors='replace')
+        mtime = path.stat().st_mtime
+    except Exception:
+        return None
+    # Detect subagent transcripts: <parent_session_id>/subagents/agent-<agentId>.jsonl
+    parent_id = None
+    agent_id = None
+    parts = path.parts
+    if 'subagents' in parts:
+        subagent_idx = parts.index('subagents')
+        parent_id = parts[subagent_idx - 1]
+        stem = path.stem  # e.g. "agent-ad288d9a6846a387d"
+        if stem.startswith('agent-'):
+            agent_id = stem[len('agent-'):]
+    return parse_transcript_content(content, mtime=mtime, parent_id=parent_id, agent_id=agent_id)
 
 
 def scan_all_transcripts() -> list[AgentRun]:

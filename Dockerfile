@@ -11,7 +11,6 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 COPY backend/ backend/
 COPY collector/ collector/
-COPY install.sh .
 COPY --from=frontend /app/frontend/dist frontend/dist
 ENV PORT=8080
 CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"]

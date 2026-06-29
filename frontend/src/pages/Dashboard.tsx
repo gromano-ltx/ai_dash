@@ -1,4 +1,5 @@
 import { useStats, useDaily } from "../lib/api";
+import { useActiveUser } from "../lib/UserContext";
 import { fmt } from "../lib/format";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -74,8 +75,9 @@ function ProviderRow({ name, runs, tokens, commits, maxRuns }: {
 }
 
 export function Dashboard() {
-  const { data: stats } = useStats();
-  const { data: daily } = useDaily();
+  const { user } = useActiveUser();
+  const { data: stats } = useStats(user || undefined);
+  const { data: daily } = useDaily(user || undefined);
 
   const totalTokens = stats
     ? stats.total_input_tokens_7d + stats.total_output_tokens_7d
