@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useStats, useDaily } from "../lib/api";
 import { useActiveUser } from "../lib/UserContext";
 import { fmt } from "../lib/format";
@@ -74,10 +75,19 @@ function ProviderRow({ name, runs, tokens, commits, maxRuns }: {
   );
 }
 
+const TIME_RANGES = [
+  { label: "24h", days: 1 },
+  { label: "7d",  days: 7 },
+  { label: "30d", days: 30 },
+  { label: "90d", days: 90 },
+  { label: "All", days: 365 },
+];
+
 export function Dashboard() {
   const { user } = useActiveUser();
-  const { data: stats } = useStats(user || undefined);
-  const { data: daily } = useDaily(user || undefined);
+  const [days, setDays] = useState(7);
+  const { data: stats } = useStats(user || undefined, days);
+  const { data: daily } = useDaily(user || undefined, days);
 
   const totalTokens = stats
     ? stats.total_input_tokens_7d + stats.total_output_tokens_7d
@@ -96,17 +106,34 @@ export function Dashboard() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-mono font-semibold text-slate-100">Overview</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Last 7 days</p>
+          <p className="text-sm text-slate-500 mt-0.5">Last {days === 1 ? "24 hours" : `${days} days`}</p>
         </div>
-        {stats?.running_count ? (
-          <div className="flex items-center gap-2 text-sm text-yellow-400 font-mono">
-            <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
-            {stats.running_count} active
+        <div className="flex items-center gap-3">
+          <div className="flex rounded border border-slate-700 overflow-hidden">
+            {TIME_RANGES.map(({ label, days: d }) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`px-3 py-1 text-xs font-mono transition-colors ${
+                  days === d
+                    ? "bg-slate-700 text-slate-100"
+                    : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-        ) : null}
+          {stats?.running_count ? (
+            <div className="flex items-center gap-2 text-sm text-yellow-400 font-mono">
+              <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+              {stats.running_count} active
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

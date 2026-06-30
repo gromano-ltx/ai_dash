@@ -72,30 +72,38 @@ def list_users(session: Session = Depends(get_session)):
 
 
 @router.get("/daily")
-def get_daily(user: Optional[str] = None, session: Session = Depends(get_session)):
+def get_daily(
+    user: Optional[str] = None,
+    days: int = Query(7, ge=1, le=3650),
+    session: Session = Depends(get_session),
+):
     runs = session.exec(select(AgentRun)).all()
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = datetime.utcnow() - timedelta(days=days)
     recent = [r for r in runs if r.started_at >= cutoff]
     if user:
         recent = [r for r in recent if r.user == user]
-    days: dict[str, dict] = {}
-    for i in range(7):
-        d = (datetime.utcnow() - timedelta(days=6 - i)).strftime("%m/%d")
-        days[d] = {"date": d, "anthropic": 0, "openai": 0, "gemini": 0,
-                   "input_tokens": 0, "output_tokens": 0}
+    buckets: dict[str, dict] = {}
+    for i in range(days):
+        d = (datetime.utcnow() - timedelta(days=days - 1 - i)).strftime("%m/%d")
+        buckets[d] = {"date": d, "anthropic": 0, "openai": 0, "gemini": 0,
+                      "input_tokens": 0, "output_tokens": 0}
     for r in recent:
         d = r.started_at.strftime("%m/%d")
-        if d in days:
-            days[d][r.provider] = days[d].get(r.provider, 0) + 1
-            days[d]["input_tokens"] += r.input_tokens
-            days[d]["output_tokens"] += r.output_tokens
-    return list(days.values())
+        if d in buckets:
+            buckets[d][r.provider] = buckets[d].get(r.provider, 0) + 1
+            buckets[d]["input_tokens"] += r.input_tokens
+            buckets[d]["output_tokens"] += r.output_tokens
+    return list(buckets.values())
 
 
 @router.get("/stats")
-def get_stats(user: Optional[str] = None, session: Session = Depends(get_session)):
+def get_stats(
+    user: Optional[str] = None,
+    days: int = Query(7, ge=1, le=3650),
+    session: Session = Depends(get_session),
+):
     runs = session.exec(select(AgentRun)).all()
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = datetime.utcnow() - timedelta(days=days)
     recent = [r for r in runs if r.started_at >= cutoff]
     if user:
         runs = [r for r in runs if r.user == user]
@@ -106,6 +114,7 @@ def get_stats(user: Optional[str] = None, session: Session = Depends(get_session
         "total_output_tokens_7d": sum(r.output_tokens for r in recent),
         "total_commits_7d": sum(len(r.git_commits) for r in recent),
         "total_prs_7d": sum(len(r.git_prs) for r in recent),
+        "days": days,
         "active_providers": list({r.provider for r in recent}),
         "running_count": sum(1 for r in runs if r.status == "running"),
         "by_provider": {

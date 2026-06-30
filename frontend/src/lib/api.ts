@@ -42,11 +42,14 @@ export function useRunChildren(parentId: string) {
   });
 }
 
-export function useDaily(user?: string) {
-  const qs = user ? `?user=${encodeURIComponent(user)}` : "";
+export function useDaily(user?: string, days?: number) {
+  const params = new URLSearchParams();
+  if (user) params.set("user", user);
+  if (days) params.set("days", String(days));
+  const qs = params.toString();
   return useQuery<DailyBucket[]>({
-    queryKey: ["daily", user],
-    queryFn: () => get(`/daily${qs}`),
+    queryKey: ["daily", user, days],
+    queryFn: () => get(`/daily${qs ? `?${qs}` : ""}`),
     refetchInterval: 30000,
   });
 }
@@ -58,11 +61,14 @@ export function useUsers() {
   });
 }
 
-export function useStats(user?: string) {
-  const qs = user ? `?user=${encodeURIComponent(user)}` : "";
+export function useStats(user?: string, days?: number) {
+  const params = new URLSearchParams();
+  if (user) params.set("user", user);
+  if (days) params.set("days", String(days));
+  const qs = params.toString();
   return useQuery<Stats>({
-    queryKey: ["stats", user],
-    queryFn: () => get(`/stats${qs}`),
+    queryKey: ["stats", user, days],
+    queryFn: () => get(`/stats${qs ? `?${qs}` : ""}`),
     refetchInterval: 10000,
   });
 }
