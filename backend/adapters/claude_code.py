@@ -11,6 +11,8 @@ from backend.models import AgentRun
 TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d+)\b|#(\d+)\b')
 GIT_COMMIT_RE = re.compile(r'\bgit commit\b')
 GH_PR_RE = re.compile(r'\bgh pr create\b')
+GIT_PUSH_RE = re.compile(r'\bgit push\b')
+GIT_REMOTE_RE = re.compile(r'\bgit remote\b')
 COMMIT_HASH_RE = re.compile(r'\[[\w/._-]+ ([0-9a-f]{7,40})\]')
 PR_URL_RE = re.compile(r'https://github\.com/\S+/pull/\d+')
 GITHUB_REPO_RE = re.compile(r'https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:[/\s]|$)')
@@ -48,6 +50,7 @@ def parse_transcript_content(
     seen_request_ids: set[str] = set()
     pending_commit_ids: set[str] = set()
     pending_pr_ids: set[str] = set()
+    pending_remote_ids: set[str] = set()
     github_repo: str | None = None
     input_tokens = 0
     output_tokens = 0
@@ -86,6 +89,11 @@ def parse_transcript_content(
                     if item.get('type') == 'tool_result':
                         tid = item.get('tool_use_id', '')
                         output = _extract_text(item.get('content', ''))
+                        if tid in pending_remote_ids and not github_repo:
+                            m = GITHUB_REPO_RE.search(output)
+                            if m:
+                                github_repo = f"https://github.com/{m.group(1)}"
+                            pending_remote_ids.discard(tid)
                         if tid in pending_commit_ids:
                             m = COMMIT_HASH_RE.search(output)
                             if m:
@@ -94,12 +102,13 @@ def parse_transcript_content(
                         if tid in pending_pr_ids:
                             m = PR_URL_RE.search(output)
                             if m:
-                                git_prs.append(m.group(0))
+                                pr_url = m.group(0)
+                                git_prs.append(pr_url)
+                                if not github_repo:
+                                    repo_m = GITHUB_REPO_RE.match(pr_url)
+                                    if repo_m:
+                                        github_repo = f"https://github.com/{repo_m.group(1)}"
                             pending_pr_ids.discard(tid)
-                        if not github_repo and output:
-                            m = GITHUB_REPO_RE.search(output)
-                            if m:
-                                github_repo = f"https://github.com/{m.group(1)}"
                     elif item.get('type') == 'text' and not first_user_text:
                         text = item.get('text', '').strip()
                         if text and not text.startswith('<'):
@@ -134,6 +143,8 @@ def parse_transcript_content(
                             pending_commit_ids.add(tid)
                         if GH_PR_RE.search(cmd) and tid:
                             pending_pr_ids.add(tid)
+                        if (GIT_PUSH_RE.search(cmd) or GIT_REMOTE_RE.search(cmd)) and tid:
+                            pending_remote_ids.add(tid)
 
     # Subagent transcripts share sessionId with the parent — use agentId to avoid collision
     run_id = (f"agent-{agent_id}" if agent_id else None) or session_id or str(uuid.uuid4())

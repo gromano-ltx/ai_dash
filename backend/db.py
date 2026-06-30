@@ -53,6 +53,11 @@ def _seed():
                     "WHERE git_prs::text != '[]' "
                     "AND git_prs::text NOT LIKE '%https://%'"
                 ))
+                # Clear github_repo from meta where it's the placeholder seed URL
+                session.exec(text(
+                    "UPDATE agent_runs SET meta = meta - 'github_repo' "
+                    "WHERE meta->>'github_repo' = 'https://github.com/org/repo'"
+                ))
                 session.commit()
             except Exception:
                 session.rollback()
