@@ -4,6 +4,7 @@ import { useRun, useRunChildren } from "../lib/api";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { fmt, duration } from "../lib/format";
+import { ticketUrl, prLabel, commitUrl } from "../lib/links";
 
 export function RunDetail() {
   const { id } = useParams<{ id: string }>();
@@ -63,11 +64,10 @@ export function RunDetail() {
         <p className="text-xs text-slate-500 font-mono uppercase tracking-wider">Activity Timeline</p>
         <div className="space-y-2 text-sm">
           <TimelineItem icon="◎" label="Task started" detail={new Date(run.started_at).toLocaleString()} />
-          {run.git_commits.map((hash) => {
-            const base = run.meta?.github_repo ?? (run.git_prs.length ? repoBase(run.git_prs[0]) : null);
-            const url = base ? `${base}/commit/${hash}` : null;
-            return <TimelineItem key={hash} icon="⬡" label="Commit" detail={hash} mono link={url ?? undefined} />;
-          })}
+          {run.git_commits.map((hash) => (
+            <TimelineItem key={hash} icon="⬡" label="Commit" detail={hash} mono
+              link={commitUrl(hash, run.meta?.github_repo, run.git_prs) ?? undefined} />
+          ))}
           {run.git_prs.map((url) => (
             <TimelineItem key={url} icon="↗" label="PR opened" detail={prLabel(url)} link={url} />
           ))}
@@ -160,19 +160,3 @@ function TimelineItem({ icon, label, detail, mono, link }: {
   );
 }
 
-function repoBase(prUrl: string): string | null {
-  const m = prUrl.match(/^(https:\/\/github\.com\/[^/]+\/[^/]+)\/pull\/\d+/);
-  return m ? m[1] : null;
-}
-
-function prLabel(url: string): string {
-  const m = url.match(/\/pull\/(\d+)$/);
-  return m ? `PR #${m[1]}` : url;
-}
-
-function ticketUrl(ref: string): string | null {
-  if (/^LINEAR-\d+$/i.test(ref)) return `https://linear.app/issue/${ref.toUpperCase()}`;
-  if (/^[A-Z]+-\d+$/.test(ref)) return null; // Jira needs org URL — configurable later
-  if (/^#\d+$/.test(ref)) return null;         // GitHub issue needs repo URL
-  return null;
-}

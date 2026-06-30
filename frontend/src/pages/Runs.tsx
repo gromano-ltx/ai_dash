@@ -5,11 +5,7 @@ import { fmt, duration } from "../lib/format";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { useNavigate } from "react-router-dom";
-
-function ticketUrl(ref: string): string | null {
-  if (/^LINEAR-\d+$/i.test(ref)) return `https://linear.app/issue/${ref.toUpperCase()}`;
-  return null;
-}
+import { ticketUrl } from "../lib/links";
 
 export function Runs() {
   const [provider, setProvider] = useState("");
