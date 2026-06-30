@@ -9,8 +9,10 @@ from typing import Optional
 from backend.models import AgentRun
 
 TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d+)\b|#(\d+)\b')
-GIT_COMMIT_RE = re.compile(r'git commit')
-GH_PR_RE = re.compile(r'gh pr create')
+GIT_COMMIT_RE = re.compile(r'\bgit commit\b')
+GH_PR_RE = re.compile(r'\bgh pr create\b')
+COMMIT_HASH_RE = re.compile(r'\[[\w/._-]+ ([0-9a-f]{7,40})\]')
+PR_URL_RE = re.compile(r'https://github\.com/\S+/pull/\d+')
 
 
 def parse_transcript_content(
@@ -43,6 +45,8 @@ def parse_transcript_content(
     git_prs: list[str] = []
 
     seen_request_ids: set[str] = set()
+    pending_commit_ids: set[str] = set()
+    pending_pr_ids: set[str] = set()
     input_tokens = 0
     output_tokens = 0
 
@@ -72,9 +76,32 @@ def parse_transcript_content(
 
         elif etype == 'user' and not event.get('isMeta'):
             msg = event.get('message', {})
-            text = _extract_text(msg.get('content', ''))
-            if text and not first_user_text and not text.startswith('<'):
-                first_user_text = text[:500]
+            content_items = msg.get('content', '')
+            if isinstance(content_items, list):
+                for item in content_items:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get('type') == 'tool_result':
+                        tid = item.get('tool_use_id', '')
+                        output = _extract_text(item.get('content', ''))
+                        if tid in pending_commit_ids:
+                            m = COMMIT_HASH_RE.search(output)
+                            if m:
+                                git_commits.append(m.group(1))
+                            pending_commit_ids.discard(tid)
+                        if tid in pending_pr_ids:
+                            m = PR_URL_RE.search(output)
+                            if m:
+                                git_prs.append(m.group(0))
+                            pending_pr_ids.discard(tid)
+                    elif item.get('type') == 'text' and not first_user_text:
+                        text = item.get('text', '').strip()
+                        if text and not text.startswith('<'):
+                            first_user_text = text[:500]
+            elif isinstance(content_items, str) and not first_user_text:
+                text = content_items.strip()
+                if text and not text.startswith('<'):
+                    first_user_text = text[:500]
 
         elif etype == 'assistant':
             msg = event.get('message', {})
@@ -94,14 +121,13 @@ def parse_transcript_content(
                 for item in content:
                     if not isinstance(item, dict) or item.get('type') != 'tool_use':
                         continue
-                    tool_name = item.get('name', '')
-                    tool_input = item.get('input', {})
-                    if tool_name == 'Bash':
-                        cmd = tool_input.get('command', '')
-                        if GIT_COMMIT_RE.search(cmd):
-                            git_commits.append(cmd[:120])
-                        if GH_PR_RE.search(cmd):
-                            git_prs.append(cmd[:300])
+                    if item.get('name') == 'Bash':
+                        cmd = item.get('input', {}).get('command', '')
+                        tid = item.get('id', '')
+                        if GIT_COMMIT_RE.search(cmd) and tid:
+                            pending_commit_ids.add(tid)
+                        if GH_PR_RE.search(cmd) and tid:
+                            pending_pr_ids.add(tid)
 
     # Subagent transcripts share sessionId with the parent — use agentId to avoid collision
     run_id = (f"agent-{agent_id}" if agent_id else None) or session_id or str(uuid.uuid4())

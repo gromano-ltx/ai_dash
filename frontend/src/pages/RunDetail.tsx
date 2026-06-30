@@ -35,11 +35,19 @@ export function RunDetail() {
         </div>
         {run.ticket_refs.length > 0 && (
           <div className="flex gap-1.5 flex-wrap">
-            {run.ticket_refs.map((t) => (
-              <span key={t} className="px-2 py-0.5 rounded text-xs font-mono bg-violet-500/15 text-violet-300 border border-violet-500/25">
-                {t}
-              </span>
-            ))}
+            {run.ticket_refs.map((t) => {
+              const url = ticketUrl(t);
+              return url ? (
+                <a key={t} href={url} target="_blank" rel="noopener noreferrer"
+                  className="px-2 py-0.5 rounded text-xs font-mono bg-violet-500/15 text-violet-300 border border-violet-500/25 hover:bg-violet-500/25 transition-colors">
+                  {t}
+                </a>
+              ) : (
+                <span key={t} className="px-2 py-0.5 rounded text-xs font-mono bg-violet-500/15 text-violet-300 border border-violet-500/25">
+                  {t}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>
@@ -55,11 +63,13 @@ export function RunDetail() {
         <p className="text-xs text-slate-500 font-mono uppercase tracking-wider">Activity Timeline</p>
         <div className="space-y-2 text-sm">
           <TimelineItem icon="◎" label="Task started" detail={new Date(run.started_at).toLocaleString()} />
-          {run.git_commits.map((hash) => (
-            <TimelineItem key={hash} icon="⬡" label="Commit" detail={hash} mono />
-          ))}
+          {run.git_commits.map((hash) => {
+            const base = run.git_prs.length ? repoBase(run.git_prs[0]) : null;
+            const url = base ? `${base}/commit/${hash}` : null;
+            return <TimelineItem key={hash} icon="⬡" label="Commit" detail={hash} mono link={url ?? undefined} />;
+          })}
           {run.git_prs.map((url) => (
-            <TimelineItem key={url} icon="↗" label="PR opened" detail={url} link={url} />
+            <TimelineItem key={url} icon="↗" label="PR opened" detail={prLabel(url)} link={url} />
           ))}
           {run.ended_at && (
             <TimelineItem
@@ -148,4 +158,21 @@ function TimelineItem({ icon, label, detail, mono, link }: {
       )}
     </div>
   );
+}
+
+function repoBase(prUrl: string): string | null {
+  const m = prUrl.match(/^(https:\/\/github\.com\/[^/]+\/[^/]+)\/pull\/\d+/);
+  return m ? m[1] : null;
+}
+
+function prLabel(url: string): string {
+  const m = url.match(/\/pull\/(\d+)$/);
+  return m ? `PR #${m[1]}` : url;
+}
+
+function ticketUrl(ref: string): string | null {
+  if (/^LINEAR-\d+$/i.test(ref)) return `https://linear.app/issue/${ref.toUpperCase()}`;
+  if (/^[A-Z]+-\d+$/.test(ref)) return null; // Jira needs org URL — configurable later
+  if (/^#\d+$/.test(ref)) return null;         // GitHub issue needs repo URL
+  return null;
 }

@@ -6,6 +6,11 @@ import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { useNavigate } from "react-router-dom";
 
+function ticketUrl(ref: string): string | null {
+  if (/^LINEAR-\d+$/i.test(ref)) return `https://linear.app/issue/${ref.toUpperCase()}`;
+  return null;
+}
+
 export function Runs() {
   const [provider, setProvider] = useState("");
   const [status, setStatus] = useState("");
@@ -90,9 +95,29 @@ export function Runs() {
                 <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{duration(run.duration_seconds)}</td>
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{fmt(run.input_tokens + run.output_tokens)}</td>
-                <td className="px-4 py-3 text-xs font-mono text-violet-400">{run.ticket_refs[0] ?? "—"}</td>
+                <td className="px-4 py-3 text-xs font-mono">
+                  {run.ticket_refs[0]
+                    ? (() => {
+                        const url = ticketUrl(run.ticket_refs[0]);
+                        return url
+                          ? <a href={url} target="_blank" rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-violet-400 hover:underline">{run.ticket_refs[0]}</a>
+                          : <span className="text-violet-400">{run.ticket_refs[0]}</span>;
+                      })()
+                    : <span className="text-slate-600">—</span>}
+                </td>
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs">{run.git_commits.length || "—"}</td>
-                <td className="px-4 py-3 text-slate-400 font-mono text-xs">{run.git_prs.length || "—"}</td>
+                <td className="px-4 py-3 text-xs font-mono">
+                  {run.git_prs.length > 0
+                    ? <a href={run.git_prs[0]} target="_blank" rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-blue-400 hover:underline">
+                        PR #{run.git_prs[0].match(/\/pull\/(\d+)/)?.[1] ?? "↗"}
+                        {run.git_prs.length > 1 && <span className="text-slate-500 ml-1">+{run.git_prs.length - 1}</span>}
+                      </a>
+                    : <span className="text-slate-600">—</span>}
+                </td>
               </tr>
             ))}
           </tbody>

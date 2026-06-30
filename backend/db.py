@@ -41,6 +41,21 @@ def _seed():
             session.commit()
             if deleted.rowcount:
                 print(f"[db] cleaned up {deleted.rowcount} subagent/stub sessions")
+            # Clean up git_commits/git_prs that stored bash commands instead of hashes/URLs
+            try:
+                session.exec(text(
+                    "UPDATE agent_runs SET git_commits = '[]'::json "
+                    "WHERE git_commits::text != '[]' "
+                    "AND git_commits::text LIKE '%\"git %'"
+                ))
+                session.exec(text(
+                    "UPDATE agent_runs SET git_prs = '[]'::json "
+                    "WHERE git_prs::text != '[]' "
+                    "AND git_prs::text NOT LIKE '%https://%'"
+                ))
+                session.commit()
+            except Exception:
+                session.rollback()
         if session.exec(select(AgentRun)).first():
             return
         now = datetime.utcnow()
