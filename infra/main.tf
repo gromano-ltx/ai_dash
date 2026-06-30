@@ -5,11 +5,10 @@ terraform {
       version = "~> 5.0"
     }
   }
-  # Uncomment to use GCS backend:
-  # backend "gcs" {
-  #   bucket = "your-tf-state-bucket"
-  #   prefix = "ai-dash"
-  # }
+  backend "gcs" {
+    bucket = "devops-ai-tools-tf-state"
+    prefix = "ai-dash"
+  }
 }
 
 provider "google" {
