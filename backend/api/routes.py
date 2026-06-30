@@ -241,5 +241,5 @@ def _to_read(run: AgentRun) -> AgentRunRead:
     duration = None
     if run.ended_at and run.started_at:
         duration = (run.ended_at - run.started_at).total_seconds()
-    data = run.model_dump(exclude={"meta"})
+    data = run.model_dump()
     return AgentRunRead(**data, duration_seconds=duration)

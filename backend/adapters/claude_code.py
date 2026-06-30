@@ -13,6 +13,7 @@ GIT_COMMIT_RE = re.compile(r'\bgit commit\b')
 GH_PR_RE = re.compile(r'\bgh pr create\b')
 COMMIT_HASH_RE = re.compile(r'\[[\w/._-]+ ([0-9a-f]{7,40})\]')
 PR_URL_RE = re.compile(r'https://github\.com/\S+/pull/\d+')
+GITHUB_REPO_RE = re.compile(r'https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:[/\s]|$)')
 
 
 def parse_transcript_content(
@@ -47,6 +48,7 @@ def parse_transcript_content(
     seen_request_ids: set[str] = set()
     pending_commit_ids: set[str] = set()
     pending_pr_ids: set[str] = set()
+    github_repo: str | None = None
     input_tokens = 0
     output_tokens = 0
 
@@ -94,6 +96,10 @@ def parse_transcript_content(
                             if m:
                                 git_prs.append(m.group(0))
                             pending_pr_ids.discard(tid)
+                        if not github_repo and output:
+                            m = GITHUB_REPO_RE.search(output)
+                            if m:
+                                github_repo = f"https://github.com/{m.group(1)}"
                     elif item.get('type') == 'text' and not first_user_text:
                         text = item.get('text', '').strip()
                         if text and not text.startswith('<'):
@@ -158,7 +164,7 @@ def parse_transcript_content(
         git_prs=list(dict.fromkeys(git_prs)),
         ticket_refs=ticket_refs,
         parent_id=parent_id,
-        meta={"git_branch": git_branch, "cwd": cwd},
+        meta={"git_branch": git_branch, "cwd": cwd, "github_repo": github_repo},
     )
 
 

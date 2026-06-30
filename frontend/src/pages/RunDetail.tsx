@@ -64,7 +64,7 @@ export function RunDetail() {
         <div className="space-y-2 text-sm">
           <TimelineItem icon="◎" label="Task started" detail={new Date(run.started_at).toLocaleString()} />
           {run.git_commits.map((hash) => {
-            const base = run.git_prs.length ? repoBase(run.git_prs[0]) : null;
+            const base = run.meta?.github_repo ?? (run.git_prs.length ? repoBase(run.git_prs[0]) : null);
             const url = base ? `${base}/commit/${hash}` : null;
             return <TimelineItem key={hash} icon="⬡" label="Commit" detail={hash} mono link={url ?? undefined} />;
           })}

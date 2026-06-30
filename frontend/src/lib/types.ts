@@ -15,6 +15,7 @@ export interface AgentRun {
   git_prs: string[];
   ticket_refs: string[];
   parent_id: string | null;
+  meta: { github_repo?: string; git_branch?: string; [key: string]: unknown };
 }
 
 export interface DailyBucket {

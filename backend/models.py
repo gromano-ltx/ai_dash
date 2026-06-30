@@ -60,3 +60,4 @@ class AgentRunRead(SQLModel):
     git_prs: list[str] = Field(default_factory=list)
     ticket_refs: list[str] = Field(default_factory=list)
     parent_id: Optional[str] = None
+    meta: dict = Field(default_factory=dict)
