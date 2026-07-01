@@ -58,6 +58,12 @@ def _seed():
                     "UPDATE agent_runs SET meta = meta - 'github_repo' "
                     "WHERE meta->>'github_repo' = 'https://github.com/org/repo'"
                 ))
+                # Null out single-word task descriptions (e.g. "pwd", "ls") — not meaningful
+                session.exec(text(
+                    "UPDATE agent_runs SET task_description = NULL "
+                    "WHERE task_description IS NOT NULL "
+                    "AND task_description NOT LIKE '% %'"
+                ))
                 session.commit()
             except Exception:
                 session.rollback()

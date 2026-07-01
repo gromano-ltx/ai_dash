@@ -169,7 +169,7 @@ def parse_transcript_content(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         label=label or (first_user_text or "")[:80] or "Claude Code session",
-        task_description=first_user_text,
+        task_description=first_user_text if first_user_text and len(first_user_text.split()) >= 3 else None,
         user=_get_user(),
         git_commits=list(dict.fromkeys(git_commits)),
         git_prs=list(dict.fromkeys(git_prs)),
