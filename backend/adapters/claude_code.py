@@ -15,7 +15,7 @@ GIT_PUSH_RE = re.compile(r'\bgit push\b')
 GIT_REMOTE_RE = re.compile(r'\bgit remote\b')
 COMMIT_HASH_RE = re.compile(r'\[[\w/._-]+ ([0-9a-f]{7,40})\]')
 PR_URL_RE = re.compile(r'https://github\.com/\S+/pull/\d+')
-GITHUB_REPO_RE = re.compile(r'https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:[/\s]|$)')
+GITHUB_REPO_RE = re.compile(r'(?:https://github\.com/|github\.com:)([\w.-]+/[\w.-]+?)(?:\.git)?(?:[/\s]|$)')
 
 
 def parse_transcript_content(
