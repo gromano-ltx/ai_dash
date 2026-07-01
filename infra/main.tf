@@ -153,6 +153,7 @@ resource "google_cloud_run_v2_service" "app" {
 
   template {
     service_account = google_service_account.app.email
+    timeout         = "3600s"
 
     volumes {
       name = "cloudsql"
