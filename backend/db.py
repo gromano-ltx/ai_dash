@@ -35,7 +35,7 @@ def _seed():
             # Remove subagent stub sessions: zero-token noise and system-prompt-labeled sub-agents
             deleted = session.exec(text(
                 "DELETE FROM agent_runs WHERE "
-                "(input_tokens + output_tokens < 10) OR "
+                "(input_tokens + output_tokens = 0) OR "
                 "(label LIKE 'You are %')"
             ))
             session.commit()

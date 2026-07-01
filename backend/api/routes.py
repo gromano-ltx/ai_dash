@@ -31,7 +31,9 @@ def list_runs(
     offset: int = 0,
     session: Session = Depends(get_session),
 ):
-    query = select(AgentRun).order_by(AgentRun.started_at.desc())
+    query = select(AgentRun).where(
+        (AgentRun.input_tokens + AgentRun.output_tokens) > 0
+    ).order_by(AgentRun.started_at.desc())
     if provider:
         query = query.where(AgentRun.provider == provider)
     if status:
@@ -210,6 +212,8 @@ async def ingest_transcript(
     run = parse_transcript_content(content, mtime=x_file_mtime)
     if not run:
         raise HTTPException(status_code=422, detail="Could not parse transcript")
+    if run.input_tokens + run.output_tokens == 0:
+        return {"id": run.id, "status": "skipped"}
     run.user = api_key.user
     run_id, run_status = run.id, run.status
     _upsert(run)
