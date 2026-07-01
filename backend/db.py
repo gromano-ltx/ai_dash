@@ -32,11 +32,12 @@ def _seed():
             session.commit()
             if runs.rowcount:
                 print(f"[db] migrated {runs.rowcount} runs: user='local' → 'Gabby'")
-            # Remove subagent stub sessions: zero-token noise and system-prompt-labeled sub-agents
+            # Remove zero-token stubs, system-prompt-labeled sub-agents, and trivial micro-sessions
             deleted = session.exec(text(
                 "DELETE FROM agent_runs WHERE "
                 "(input_tokens + output_tokens = 0) OR "
-                "(label LIKE 'You are %')"
+                "(label LIKE 'You are %') OR "
+                "(input_tokens + output_tokens < 300 AND task_description IS NULL AND label = 'Claude Code session')"
             ))
             session.commit()
             if deleted.rowcount:
