@@ -213,7 +213,7 @@ async def ingest_transcript(
     if not run:
         raise HTTPException(status_code=422, detail="Could not parse transcript")
     total_tokens = run.input_tokens + run.output_tokens
-    if total_tokens == 0 or (total_tokens < 300 and not run.task_description):
+    if total_tokens < 50 or (total_tokens < 300 and not run.task_description):
         return {"id": run.id, "status": "skipped"}
     run.user = api_key.user
     run_id, run_status = run.id, run.status
