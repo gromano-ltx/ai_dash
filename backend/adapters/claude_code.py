@@ -146,6 +146,11 @@ def parse_transcript_content(
                         if (GIT_PUSH_RE.search(cmd) or GIT_REMOTE_RE.search(cmd)) and tid:
                             pending_remote_ids.add(tid)
 
+    # isMeta/ai-title events are rare; most transcript lines carry sessionId regardless
+    # of event type, so fall back to that for stable run identity across ingests.
+    if not session_id:
+        session_id = next((e.get('sessionId') for e in events if e.get('sessionId')), None)
+
     # Subagent transcripts share sessionId with the parent — use agentId to avoid collision
     run_id = (f"agent-{agent_id}" if agent_id else None) or session_id or str(uuid.uuid4())
 

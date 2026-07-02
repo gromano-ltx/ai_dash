@@ -21,19 +21,26 @@ async def _cleanup_stale_runs():
     Sessions are stored as 'running' when first ingested while fresh. The collector
     doesn't re-ship unchanged files, so without this task they stay 'running' forever.
     """
-    from sqlalchemy import text
+    from datetime import datetime, timedelta
+    from sqlmodel import select
     from backend.db import get_session as _get_session
+    from backend.models import AgentRun
     while True:
         await asyncio.sleep(120)
         try:
             with next(_get_session()) as session:
-                result = session.exec(text(
-                    "UPDATE agent_runs SET status='done' "
-                    "WHERE status='running' AND started_at < NOW() - INTERVAL '10 minutes'"
-                ))
-                session.commit()
-                if result.rowcount:
-                    print(f"[cleanup] marked {result.rowcount} stale runs as done")
+                cutoff = datetime.utcnow() - timedelta(minutes=10)
+                stale = session.exec(
+                    select(AgentRun).where(
+                        AgentRun.status == "running", AgentRun.started_at < cutoff
+                    )
+                ).all()
+                for run in stale:
+                    run.status = "done"
+                    session.add(run)
+                if stale:
+                    session.commit()
+                    print(f"[cleanup] marked {len(stale)} stale runs as done")
         except Exception as exc:
             print(f"[cleanup] error: {exc}")
 
