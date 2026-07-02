@@ -46,11 +46,16 @@ def list_runs(
         # Hide subagent runs by default — they appear in the trace tree of their parent
         query = query.where(AgentRun.parent_id == None)  # noqa: E711
     if ticket:
-        runs = [r for r in session.exec(query).all() if ticket in r.ticket_refs]
+        ticket_lower = ticket.strip().lower()
+        runs = [
+            r for r in session.exec(query).all()
+            if any(ticket_lower in ref.lower() for ref in r.ticket_refs)
+        ]
         runs = runs[offset: offset + limit]
     else:
         runs = session.exec(query.offset(offset).limit(limit)).all()
-    return [_to_read(r) for r in runs]
+    running_parents = _parents_with_running_children(session, [r.id for r in runs])
+    return [_to_read(r, running_parents) for r in runs]
 
 
 @router.get("/runs/{run_id}", response_model=AgentRunRead)
@@ -58,7 +63,7 @@ def get_run(run_id: str, session: Session = Depends(get_session)):
     run = session.get(AgentRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return _to_read(run)
+    return _to_read(run, _parents_with_running_children(session, [run_id]))
 
 
 @router.get("/providers")
@@ -242,9 +247,25 @@ async def stream_runs():
     return EventSourceResponse(generator())
 
 
-def _to_read(run: AgentRun) -> AgentRunRead:
+def _parents_with_running_children(session: Session, run_ids: list[str]) -> set[str]:
+    if not run_ids:
+        return set()
+    parent_ids = session.exec(
+        select(AgentRun.parent_id).where(
+            AgentRun.parent_id.in_(run_ids), AgentRun.status == "running"
+        )
+    ).all()
+    return set(parent_ids)
+
+
+def _to_read(run: AgentRun, running_parents: set[str] = frozenset()) -> AgentRunRead:
     duration = None
     if run.ended_at and run.started_at:
         duration = (run.ended_at - run.started_at).total_seconds()
     data = run.model_dump()
+    if data["status"] == "done" and run.id in running_parents:
+        # A parent's own transcript can go idle while it waits on Task-tool
+        # subagents, tripping the done-timeout even though children are
+        # still actively running — reflect the children's activity instead.
+        data["status"] = "running"
     return AgentRunRead(**data, duration_seconds=duration)
