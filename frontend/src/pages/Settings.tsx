@@ -15,8 +15,14 @@ export function Settings() {
 
   useEffect(() => {
     fetch("/api/keys")
-      .then((r) => r.json())
-      .then(setKeys)
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.detail ?? "Failed to load keys");
+          return;
+        }
+        setKeys(Array.isArray(data) ? data : []);
+      })
       .catch(() => setError("Failed to load keys"));
   }, []);
 
