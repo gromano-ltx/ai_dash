@@ -46,7 +46,9 @@ def _seed():
                 print(f"[db] cleaned up {deleted.rowcount} subagent/stub sessions")
             # Clean up git_commits/git_prs that stored bash commands instead of hashes/URLs.
             # Done in Python (rather than dialect-specific SQL like Postgres's ::json casts
-            # and jsonb `-` operator) so it works on both SQLite and Postgres.
+            # and jsonb `-` operator) so it works on both SQLite and Postgres — the previous
+            # Postgres-only SQL raised on the default SQLite engine and was silently rolled
+            # back by a bare except, so this cleanup never actually ran.
             try:
                 for run in session.exec(select(AgentRun)).all():
                     dirty = False
