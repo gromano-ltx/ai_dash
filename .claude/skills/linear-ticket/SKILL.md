@@ -87,6 +87,31 @@ Every ticket uses the same three sections, in this order:
 `DoD` bullets are plain `*` bullets (not `- [ ]` checkboxes). Keep `Description` and `Objectives`
 each to a short paragraph or two — this is a ticket, not a design doc.
 
+## Linking a PR to a ticket
+
+Once a PR exists for a ticket's fix, link it back into the ticket **both** ways — don't rely on
+just one:
+
+1. **Attachment** — shows up in Linear's side panel:
+   ```bash
+   export LINEAR_API_KEY=$(grep -o 'lin_api_[A-Za-z0-9]*' .claude/settings.local.json | head -1)
+   curl -s https://api.linear.app/graphql \
+     -H "Authorization: $LINEAR_API_KEY" -H "Content-Type: application/json" \
+     --data '{
+       "query": "mutation($input: AttachmentCreateInput!) { attachmentCreate(input: $input) { success } }",
+       "variables": { "input": { "issueId": "<issue-uuid>", "title": "Pull Request", "url": "<pr-url>" } }
+     }'
+   ```
+2. **Description** — append a `## Pull Request` section (with just the URL) to the end of the
+   existing description body, so the link is visible inline without opening the side panel. Fetch
+   the current description first, append the section, and send the whole thing back via
+   `issueUpdate` (the `description` field is a full replace, not an append).
+
+Do this as soon as the PR is opened — don't wait until it merges. When a ticket also needs a state
+change (e.g. to In Review once a PR is up), send that as a separate `issueUpdate` call, not bundled
+into the description-update call, so a partial failure doesn't leave the state changed without the
+link (or vice versa).
+
 ## Example mutation
 
 ```bash
