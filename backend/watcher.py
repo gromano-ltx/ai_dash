@@ -6,6 +6,11 @@ from backend.models import AgentRun
 from backend.adapters.claude_code import parse_transcript, scan_all_transcripts
 from backend import sse
 
+# Runs below this combined token count are treated as trivial/stub sessions
+# and are not persisted. Mirrors the threshold enforced in
+# backend/api/routes.py's ingest_transcript endpoint.
+MIN_TOKENS_TO_PERSIST = 150
+
 
 async def watch() -> None:
     for run in scan_all_transcripts():
@@ -21,8 +26,7 @@ async def watch() -> None:
             changed = {Path(path) for _, path in changes if path.endswith(".jsonl")}
             for path in changed:
                 run = parse_transcript(path)
-                if run:
-                    _upsert(run)
+                if run and _upsert(run):
                     await sse.broadcast({"type": "run_updated", "id": run.id})
     except asyncio.CancelledError:
         raise
@@ -30,13 +34,23 @@ async def watch() -> None:
         print(f"[watcher] error: {exc}")
 
 
-def _upsert(run: AgentRun) -> None:
+def _upsert(run: AgentRun) -> bool:
+    """Insert or update `run`. Returns False (no-op) for trivial/stub runs
+    below MIN_TOKENS_TO_PERSIST, matching the ingest endpoint's behavior."""
+    if run.input_tokens + run.output_tokens < MIN_TOKENS_TO_PERSIST:
+        return False
     with Session(engine) as session:
         existing = session.get(AgentRun, run.id)
         if existing:
-            for key, val in run.model_dump(exclude={"id"}).items():
+            # Don't let `user` flip depending on write order between the
+            # local watcher and the remote collector's ingest path: only
+            # adopt the incoming user if the existing run doesn't have one.
+            for key, val in run.model_dump(exclude={"id", "user"}).items():
                 setattr(existing, key, val)
+            if run.user and not existing.user:
+                existing.user = run.user
             session.add(existing)
         else:
             session.add(run)
         session.commit()
+    return True
