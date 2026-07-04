@@ -109,8 +109,9 @@ if _FRONTEND.exists():
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         target = (_FRONTEND / full_path).resolve()
-        # Prevent path traversal
-        if not str(target).startswith(str(_FRONTEND_RESOLVED)):
+        # Prevent path traversal (proper containment check, not a string prefix
+        # comparison, which would wrongly allow siblings like "dist-backup").
+        if not target.is_relative_to(_FRONTEND_RESOLVED):
             return Response(status_code=403)
         if target.is_file():
             return FileResponse(target)
