@@ -216,7 +216,11 @@ async def ship(
 
     compressed = gzip.compress(new_bytes)
 
-    # Three attempts with backoff for transient network errors
+    # Three attempts with backoff for transient network errors — mirrors
+    # _ship_urllib's retry loop below. Without this, the async httpx path
+    # (the default whenever httpx/watchfiles are installed) had no retry at
+    # all, so a single transient failure left this byte range unsent with
+    # no immediate retry.
     for attempt in range(3):
         try:
             resp = await client.post(
