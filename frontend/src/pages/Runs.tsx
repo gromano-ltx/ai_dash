@@ -33,6 +33,8 @@ export function Runs() {
     setPage(0);
   }, [provider, status, effectiveUser, ticket]);
 
+  // No total-count endpoint exists, so infer "more pages" from a full page
+  // coming back — a short page means this was the last one.
   const hasNextPage = (runs?.length ?? 0) >= PAGE_SIZE;
 
   return (
