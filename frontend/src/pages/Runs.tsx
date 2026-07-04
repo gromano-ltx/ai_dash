@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRuns, useUsers } from "../lib/api";
 import { useActiveUser } from "../lib/UserContext";
 import { fmt, duration } from "../lib/format";
@@ -7,26 +7,41 @@ import { ProviderBadge } from "../components/ProviderBadge";
 import { useNavigate } from "react-router-dom";
 import { ticketUrl, prLabel, commitUrl } from "../lib/links";
 
+const PAGE_SIZE = 50;
+
 export function Runs() {
   const [provider, setProvider] = useState("");
   const [status, setStatus] = useState("");
   const [user, setUser] = useState("");
   const [ticket, setTicket] = useState("");
+  const [page, setPage] = useState(0);
   const { data: usersData } = useUsers();
   const { user: globalUser } = useActiveUser();
+  const effectiveUser = user || globalUser || undefined;
   const { data: runs, isLoading } = useRuns({
     provider: provider || undefined,
     status: status || undefined,
-    user: user || globalUser || undefined,
+    user: effectiveUser,
     ticket: ticket || undefined,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
   });
   const navigate = useNavigate();
+
+  // Reset to the first page whenever any filter changes.
+  useEffect(() => {
+    setPage(0);
+  }, [provider, status, effectiveUser, ticket]);
+
+  const hasNextPage = (runs?.length ?? 0) >= PAGE_SIZE;
 
   return (
     <div className="p-6 space-y-5">
       <div>
         <h1 className="text-lg font-mono font-semibold text-slate-100">Runs</h1>
-        <p className="text-sm text-slate-500 mt-0.5">{runs?.length ?? 0} results</p>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Showing {runs?.length ?? 0} results (page {page + 1})
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -129,6 +144,25 @@ export function Runs() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setPage((p) => Math.max(0, p - 1))}
+          disabled={page === 0}
+          className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-slate-500"
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          onClick={() => setPage((p) => p + 1)}
+          disabled={!hasNextPage}
+          className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-slate-500"
+        >
+          Next
+        </button>
       </div>
     </div>
   );

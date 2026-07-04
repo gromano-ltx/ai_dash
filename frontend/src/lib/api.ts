@@ -14,12 +14,16 @@ export function useRuns(filters?: {
   status?: string;
   user?: string;
   ticket?: string;
+  limit?: number;
+  offset?: number;
 }) {
   const params = new URLSearchParams();
   if (filters?.provider) params.set("provider", filters.provider);
   if (filters?.status) params.set("status", filters.status);
   if (filters?.user) params.set("user", filters.user);
   if (filters?.ticket) params.set("ticket", filters.ticket);
+  if (filters?.limit != null) params.set("limit", String(filters.limit));
+  if (filters?.offset != null) params.set("offset", String(filters.offset));
   const qs = params.toString();
   return useQuery<AgentRun[]>({
     queryKey: ["runs", filters],
