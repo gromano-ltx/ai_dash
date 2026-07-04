@@ -238,11 +238,14 @@ ai_dash/
 6. ✅ GCP deploy — Terraform → Cloud Run + Cloud SQL + Artifact Registry + Secret Manager
 7. ✅ Custom domain — `dash.ai-coordinator.io` via Cloudflare Worker
 8. ✅ Collector daemon — ships local transcripts to live server
-9. ⬜ Trace tree — `parent_id` linkage + nested expand/collapse UI
-10. ⬜ OpenAI adapter — proxy or SDK integration
-11. ⬜ Gemini adapter — proxy or SDK integration
-12. ⬜ Multi-user isolation — per-user data visibility
-13. ⬜ API key management UI — currently seeded manually
+9. ✅ Trace tree — `parent_id` linkage + nested expand/collapse UI in RunDetail
+10. ⬜ OpenAI adapter — proxy or SDK integration (v2)
+11. ⬜ Gemini adapter — proxy or SDK integration (v2)
+12. ✅ Multi-user isolation — per-user data visibility, user switcher, UserContext
+13. ✅ API key management UI — Settings page with create/copy/delete
+14. ⬜ Cost tracking — estimate $ spend from token counts × model pricing table; show on dashboard + run detail
+15. ⬜ Installer — new `install.sh` one-liner to replace deleted version; launchd/systemd service setup
+16. ⬜ Clickable links — PR URLs, GitHub commit links, and ticket refs (Linear / Jira) in run list and detail; prefer PR over bare commit; fall back to commit URL constructed from git remote; ticket URL from configured org base URL in Settings
 
 ---
 

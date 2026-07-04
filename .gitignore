@@ -20,9 +20,13 @@ infra/terraform.tfvars
 infra/*.tfstate
 infra/*.tfstate.backup
 infra/.terraform.lock.hcl
+infra/tfplan
 
 # Collector state / config
 .ai_dash/
+
+# Graphify output
+graphify-out/
 
 # Env
 .env
