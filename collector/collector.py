@@ -216,37 +216,42 @@ async def ship(
 
     compressed = gzip.compress(new_bytes)
 
-    try:
-        resp = await client.post(
-            f"{url.rstrip('/')}/api/v1/ingest",
-            content=compressed,
-            headers={
-                "X-API-Key": key,
-                "Content-Type": "text/plain",
-                "Content-Encoding": "gzip",
-                "X-Session-Id": path.stem,
-                "X-File-Offset": str(offset),
-                "X-File-Mtime": str(mtime),
-            },
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            new_offset = offset + len(new_bytes)
-            print(
-                f"[ai-dash] {path.name} → {data.get('id', '?')} ({data.get('status', '?')})  "
-                f"{len(new_bytes):,}B raw → {len(compressed):,}B gz"
+    # Three attempts with backoff for transient network errors
+    for attempt in range(3):
+        try:
+            resp = await client.post(
+                f"{url.rstrip('/')}/api/v1/ingest",
+                content=compressed,
+                headers={
+                    "X-API-Key": key,
+                    "Content-Type": "text/plain",
+                    "Content-Encoding": "gzip",
+                    "X-Session-Id": path.stem,
+                    "X-File-Offset": str(offset),
+                    "X-File-Mtime": str(mtime),
+                },
+                timeout=15,
             )
-            return True, new_offset, len(compressed)
-        elif resp.status_code == 400 and "Resend from offset 0" in resp.text:
-            print(f"[ai-dash] server lost session for {path.name}, re-sending from offset 0")
-            return await ship(path, url, key, client, offset=0, mtime=mtime)
-        else:
-            print(f"[ai-dash] server error {resp.status_code} for {path.name}", file=sys.stderr)
-            return False, offset, 0
-    except Exception as exc:
-        print(f"[ai-dash] failed to ship {path.name}: {exc}", file=sys.stderr)
-        return False, offset, 0
+            if resp.status_code == 200:
+                data = resp.json()
+                new_offset = offset + len(new_bytes)
+                print(
+                    f"[ai-dash] {path.name} → {data.get('id', '?')} ({data.get('status', '?')})  "
+                    f"{len(new_bytes):,}B raw → {len(compressed):,}B gz"
+                )
+                return True, new_offset, len(compressed)
+            elif resp.status_code == 400 and "Resend from offset 0" in resp.text:
+                print(f"[ai-dash] server lost session for {path.name}, re-sending from offset 0")
+                return await ship(path, url, key, client, offset=0, mtime=mtime)
+            else:
+                print(f"[ai-dash] server error {resp.status_code} for {path.name}", file=sys.stderr)
+        except Exception as exc:
+            print(f"[ai-dash] failed to ship {path.name}: {exc}", file=sys.stderr)
+
+        if attempt < 2:
+            await asyncio.sleep(2 ** attempt)
+
+    return False, offset, 0
 
 
 async def sync_all(url: str, key: str, state: dict, client) -> dict:
