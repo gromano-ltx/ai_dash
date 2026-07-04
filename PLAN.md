@@ -243,9 +243,13 @@ ai_dash/
 11. ⬜ Gemini adapter — proxy or SDK integration (v2)
 12. ✅ Multi-user isolation — per-user data visibility, user switcher, UserContext
 13. ✅ API key management UI — Settings page with create/copy/delete
-14. ⬜ Cost tracking — estimate $ spend from token counts × model pricing table; show on dashboard + run detail
-15. ⬜ Installer — new `install.sh` one-liner to replace deleted version; launchd/systemd service setup
-16. ⬜ Clickable links — PR URLs, GitHub commit links, and ticket refs (Linear / Jira) in run list and detail; prefer PR over bare commit; fall back to commit URL constructed from git remote; ticket URL from configured org base URL in Settings
+14. ⬜ Cost tracking — estimate $ spend from token counts × model pricing table; show on dashboard + run detail (AI-5)
+15. ⬜ Installer — new `install.sh` one-liner to replace deleted version; launchd/systemd service setup (AI-6)
+16. ⬜ Clickable links — PR URLs, GitHub commit links, and ticket refs (Linear / Jira) in run list and detail; prefer PR over bare commit; fall back to commit URL constructed from git remote; ticket URL from configured org base URL in Settings (AI-8)
+17. ⬜ Auth — per-user login to replace shared dashboard password (AI-7)
+18. ⬜ Remove seed/demo data from production DB (AI-9)
+19. ⬜ Backend pytest test suite for API + ingest logic (AI-17)
+20. ⬜ CI — automatic deploy to Cloud Run on merge to main (AI-18)
 
 ---
 
