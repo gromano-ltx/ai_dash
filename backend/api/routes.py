@@ -19,6 +19,23 @@ MAX_INGEST_BYTES = 100 * 1024 * 1024      # 100 MB decompressed
 router = APIRouter()
 
 
+def _visible_runs_query():
+    """Base query for runs that should count toward dashboard aggregates.
+
+    Excludes zero-token stub rows and subagent rows (parent_id set), which
+    only appear nested in their parent's trace tree — matching the default
+    (non include_children) filtering that list_runs applies.
+    """
+    return select(AgentRun).where(
+        (AgentRun.input_tokens + AgentRun.output_tokens) > 0,
+        AgentRun.parent_id == None,  # noqa: E711
+    )
+
+
+def _visible_runs(session: Session) -> list[AgentRun]:
+    return session.exec(_visible_runs_query()).all()
+
+
 @router.get("/runs", response_model=list[AgentRunRead])
 def list_runs(
     provider: Optional[str] = None,
@@ -68,13 +85,13 @@ def get_run(run_id: str, session: Session = Depends(get_session)):
 
 @router.get("/providers")
 def list_providers(session: Session = Depends(get_session)):
-    runs = session.exec(select(AgentRun)).all()
+    runs = _visible_runs(session)
     return {"providers": list({r.provider for r in runs})}
 
 
 @router.get("/users")
 def list_users(session: Session = Depends(get_session)):
-    runs = session.exec(select(AgentRun)).all()
+    runs = _visible_runs(session)
     return {"users": sorted({r.user for r in runs if r.user})}
 
 
@@ -84,22 +101,26 @@ def get_daily(
     days: int = Query(7, ge=1, le=3650),
     session: Session = Depends(get_session),
 ):
-    runs = session.exec(select(AgentRun)).all()
+    runs = _visible_runs(session)
     cutoff = datetime.utcnow() - timedelta(days=days)
     recent = [r for r in runs if r.started_at >= cutoff]
     if user:
         recent = [r for r in recent if r.user == user]
+    # Bucket by full ISO date internally so dates a year+ apart that share
+    # the same month/day never collide; format for display (MM/DD, what the
+    # frontend expects) only after grouping.
     buckets: dict[str, dict] = {}
     for i in range(days):
-        d = (datetime.utcnow() - timedelta(days=days - 1 - i)).strftime("%m/%d")
-        buckets[d] = {"date": d, "anthropic": 0, "openai": 0, "gemini": 0,
-                      "input_tokens": 0, "output_tokens": 0}
+        day = datetime.utcnow() - timedelta(days=days - 1 - i)
+        key = day.strftime("%Y-%m-%d")
+        buckets[key] = {"date": day.strftime("%m/%d"), "anthropic": 0, "openai": 0, "gemini": 0,
+                        "input_tokens": 0, "output_tokens": 0}
     for r in recent:
-        d = r.started_at.strftime("%m/%d")
-        if d in buckets:
-            buckets[d][r.provider] = buckets[d].get(r.provider, 0) + 1
-            buckets[d]["input_tokens"] += r.input_tokens
-            buckets[d]["output_tokens"] += r.output_tokens
+        key = r.started_at.strftime("%Y-%m-%d")
+        if key in buckets:
+            buckets[key][r.provider] = buckets[key].get(r.provider, 0) + 1
+            buckets[key]["input_tokens"] += r.input_tokens
+            buckets[key]["output_tokens"] += r.output_tokens
     return list(buckets.values())
 
 
@@ -109,7 +130,7 @@ def get_stats(
     days: int = Query(7, ge=1, le=3650),
     session: Session = Depends(get_session),
 ):
-    runs = session.exec(select(AgentRun)).all()
+    runs = _visible_runs(session)
     cutoff = datetime.utcnow() - timedelta(days=days)
     recent = [r for r in runs if r.started_at >= cutoff]
     if user:
