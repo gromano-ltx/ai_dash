@@ -5,7 +5,7 @@ import { fmt, duration } from "../lib/format";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { useNavigate } from "react-router-dom";
-import { ticketUrl } from "../lib/links";
+import { ticketUrl, prLabel, commitUrl } from "../lib/links";
 
 export function Runs() {
   const [provider, setProvider] = useState("");
@@ -67,14 +67,14 @@ export function Runs() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-800">
-              {["Task", "Provider", "Model", "User", "Status", "Duration", "Tokens", "Ticket", "Commits", "PRs"].map((h) => (
+              {["Task", "Provider", "Model", "User", "Status", "Duration", "Tokens", "Ticket", "Code"].map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 text-xs font-mono text-slate-500 font-normal whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-600 font-mono text-sm">loading…</td></tr>
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-600 font-mono text-sm">loading…</td></tr>
             )}
             {runs?.map((run) => (
               <tr
@@ -103,15 +103,26 @@ export function Runs() {
                       })()
                     : <span className="text-slate-600">—</span>}
                 </td>
-                <td className="px-4 py-3 text-slate-400 font-mono text-xs">{run.git_commits.length || "—"}</td>
                 <td className="px-4 py-3 text-xs font-mono">
                   {run.git_prs.length > 0
                     ? <a href={run.git_prs[0]} target="_blank" rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
                         className="text-blue-400 hover:underline">
-                        PR #{run.git_prs[0].match(/\/pull\/(\d+)/)?.[1] ?? "↗"}
+                        {prLabel(run.git_prs[0])}
                         {run.git_prs.length > 1 && <span className="text-slate-500 ml-1">+{run.git_prs.length - 1}</span>}
                       </a>
+                    : run.git_commits.length > 0
+                    ? (() => {
+                        const hash = run.git_commits[0];
+                        const url = commitUrl(hash, run.meta?.github_repo, run.git_prs);
+                        const label = hash.slice(0, 7);
+                        const extra = run.git_commits.length > 1 && <span className="text-slate-500 ml-1">+{run.git_commits.length - 1}</span>;
+                        return url
+                          ? <a href={url} target="_blank" rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-400 hover:underline">{label}{extra}</a>
+                          : <span className="text-slate-300">{label}{extra}</span>;
+                      })()
                     : <span className="text-slate-600">—</span>}
                 </td>
               </tr>
