@@ -260,11 +260,24 @@ resource "google_service_account_iam_member" "github_deployer_wif" {
 }
 
 # `gcloud builds submit` tarballs the local source and uploads it to Cloud
-# Build's staging bucket before Cloud Build ever runs; grant object-level
-# access to that bucket only (least privilege, not full bucket admin).
+# Build's staging bucket before Cloud Build ever runs — needs object CRUD.
 resource "google_storage_bucket_iam_member" "github_deployer_staging" {
   bucket = "${var.project_id}_cloudbuild"
   role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
+# gcloud also needs storage.buckets.get to locate/verify the bucket before
+# uploading — this bucket has Uniform Bucket-Level Access disabled (legacy
+# ACL mode), where that check is enforced separately from object access.
+# objectAdmin doesn't include it; legacyBucketReader adds exactly buckets.get
+# + read-only listing, without storage.admin's extra bucket-management
+# permissions (delete, setIamPolicy, update) that aren't needed here.
+# Confirmed missing by two actual failed live runs ("forbidden from
+# accessing the bucket") even after objectAdmin was granted.
+resource "google_storage_bucket_iam_member" "github_deployer_staging_reader" {
+  bucket = "${var.project_id}_cloudbuild"
+  role   = "roles/storage.legacyBucketReader"
   member = "serviceAccount:${google_service_account.github_deployer.email}"
 }
 
