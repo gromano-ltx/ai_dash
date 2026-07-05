@@ -44,9 +44,13 @@ async def _cleanup_stale_runs():
                 ).all()
                 for run in stale:
                     run.status = "done"
-                    # Best available proxy for when the session actually
-                    # ended, so duration_seconds isn't permanently null.
-                    run.ended_at = run.updated_at or run.started_at
+                    # Only set ended_at when updated_at gives a real proxy
+                    # for when the session went idle. Falling back to
+                    # started_at would make ended_at == started_at — a
+                    # fabricated 0s duration, which is more misleading than
+                    # leaving duration unknown (still "—") for these rows.
+                    if run.updated_at:
+                        run.ended_at = run.updated_at
                     session.add(run)
                 if stale:
                     session.commit()
