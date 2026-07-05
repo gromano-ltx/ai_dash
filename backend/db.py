@@ -126,3 +126,17 @@ def _seed():
                     session.delete(r)
                 session.commit()
                 print(f"[db] removed {len(to_delete)} seed/demo rows")
+            # Backfill ended_at for runs already stuck "done" with a null
+            # duration — the stale-run cleanup only fixes rows it *currently*
+            # marks done (status == "running"); a row the old, pre-fix sweep
+            # already flipped to "done" is skipped forever otherwise, since
+            # it's no longer "running" by the time the fixed sweep looks.
+            stuck = session.exec(
+                select(AgentRun).where(AgentRun.status == "done", AgentRun.ended_at == None)  # noqa: E711
+            ).all()
+            if stuck:
+                for r in stuck:
+                    r.ended_at = r.updated_at or r.started_at
+                    session.add(r)
+                session.commit()
+                print(f"[db] backfilled ended_at for {len(stuck)} runs stuck done with null duration")
