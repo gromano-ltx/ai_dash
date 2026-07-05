@@ -12,3 +12,13 @@ output "db_instance_connection" {
   description = "Cloud SQL instance connection name"
   value       = google_sql_database_instance.main.connection_name
 }
+
+output "workload_identity_provider" {
+  description = "Full resource name of the WIF provider for GitHub Actions (AI-18)"
+  value       = google_iam_workload_identity_pool_provider.github.name
+}
+
+output "github_deployer_service_account" {
+  description = "Service account email GitHub Actions impersonates to deploy (AI-18)"
+  value       = google_service_account.github_deployer.email
+}
