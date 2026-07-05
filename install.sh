@@ -27,7 +27,11 @@ curl -fsSL "$AI_DASH_URL/collector.py" -o "$COLLECTOR_PY"
 
 # 3. Config — prompt only if missing, so re-running is idempotent
 if [ ! -f "$CONFIG_FILE" ]; then
-  read -rp "ai-dash API key: " AI_DASH_KEY
+  # Read from the controlling terminal explicitly — when this script runs via
+  # `curl ... | bash`, stdin is the pipe carrying the script itself, not the
+  # terminal, so a plain `read` would consume script bytes (or hit EOF and
+  # abort under `set -e`) instead of prompting the user.
+  read -rp "ai-dash API key: " AI_DASH_KEY </dev/tty
   cat > "$CONFIG_FILE" <<EOF
 {"url": "$AI_DASH_URL", "key": "$AI_DASH_KEY"}
 EOF
@@ -78,6 +82,7 @@ Description=ai-dash collector
 [Service]
 ExecStart=$VENV_DIR/bin/python $COLLECTOR_PY
 Restart=always
+RestartSec=5
 StandardOutput=null
 StandardError=null
 
@@ -86,6 +91,10 @@ WantedBy=default.target
 EOF
   systemctl --user daemon-reload
   systemctl --user enable --now ai-dash-collector.service
+  # A --user service stops on logout and won't start at boot unless linger is
+  # enabled for this user — without this, "restarts automatically" doesn't
+  # hold once the user's session ends.
+  loginctl enable-linger "$USER" 2>/dev/null || true
   echo "[ai-dash] systemd service installed and started"
 else
   echo "[ai-dash] unsupported OS '$OS_NAME' — run manually: $VENV_DIR/bin/python $COLLECTOR_PY" >&2
