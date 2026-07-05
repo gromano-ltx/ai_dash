@@ -16,8 +16,26 @@ logger = logging.getLogger(__name__)
 
 
 def init_db():
+    _add_missing_columns()
     SQLModel.metadata.create_all(engine)
     _seed()
+
+
+def _add_missing_columns():
+    """create_all() only creates missing tables, never ALTERs existing ones —
+    so a new column added to a model (e.g. AgentRun.updated_at) has to be
+    backfilled by hand for a table that already exists in production. The
+    ADD COLUMN syntax below is plain SQL, valid on both SQLite and Postgres."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "agent_runs" not in inspector.get_table_names():
+        return
+    existing_columns = {c["name"] for c in inspector.get_columns("agent_runs")}
+    if "updated_at" not in existing_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE agent_runs ADD COLUMN updated_at TIMESTAMP"))
+        logger.info("[db] added agent_runs.updated_at column")
 
 
 def get_session():

@@ -20,9 +20,15 @@ async def _cleanup_stale_runs():
 
     Sessions are stored as 'running' when first ingested while fresh. The collector
     doesn't re-ship unchanged files, so without this task they stay 'running' forever.
+
+    Keyed on updated_at (last time this row was actually re-parsed/upserted),
+    not started_at — a session active for hours (started_at long past the
+    cutoff) would otherwise get marked stale/'done' after just 10 minutes
+    even while still genuinely running. updated_at can be NULL for rows
+    created before this column existed, so those are treated as stale too.
     """
     from datetime import datetime, timedelta
-    from sqlmodel import select
+    from sqlmodel import select, or_
     from backend.db import get_session as _get_session
     from backend.models import AgentRun
     while True:
@@ -32,11 +38,15 @@ async def _cleanup_stale_runs():
                 cutoff = datetime.utcnow() - timedelta(minutes=10)
                 stale = session.exec(
                     select(AgentRun).where(
-                        AgentRun.status == "running", AgentRun.started_at < cutoff
+                        AgentRun.status == "running",
+                        or_(AgentRun.updated_at < cutoff, AgentRun.updated_at == None),  # noqa: E711
                     )
                 ).all()
                 for run in stale:
                     run.status = "done"
+                    # Best available proxy for when the session actually
+                    # ended, so duration_seconds isn't permanently null.
+                    run.ended_at = run.updated_at or run.started_at
                     session.add(run)
                 if stale:
                     session.commit()
