@@ -15,8 +15,17 @@ export function Settings() {
 
   useEffect(() => {
     fetch("/api/keys")
-      .then((r) => r.json())
-      .then(setKeys)
+      .then(async (res) => {
+        const data = await res.json();
+        // Guard against non-2xx responses (e.g. auth failure) the same way
+        // handleCreate/handleDelete already do below — otherwise an error
+        // body lands in `keys` and the .map() call further down crashes.
+        if (!res.ok) {
+          setError(data.detail ?? "Failed to load keys");
+          return;
+        }
+        setKeys(Array.isArray(data) ? data : []);
+      })
       .catch(() => setError("Failed to load keys"));
   }, []);
 
