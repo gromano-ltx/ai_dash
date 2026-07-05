@@ -259,6 +259,19 @@ resource "google_service_account_iam_member" "github_deployer_wif" {
   member              = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/gromano-ltx/ai_dash"
 }
 
+# cloudbuild.yaml doesn't specify a custom build service account, so the build
+# runs as the default Compute Engine service account. Whoever *submits* a build
+# that runs under a given service account needs iam.serviceAccountUser on that
+# account (confirmed by an actual live run: "caller does not have permission to
+# act as service account ...-compute@developer.gserviceaccount.com"). This is
+# separate from cloudbuild_sa_user above, which grants Cloud Build's own
+# service agent (not github-deployer, the submitter) project-wide actAs rights.
+resource "google_service_account_iam_member" "github_deployer_actas_compute" {
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+  role                = "roles/iam.serviceAccountUser"
+  member              = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
 # `gcloud builds submit` tarballs the local source and uploads it to Cloud
 # Build's staging bucket before Cloud Build ever runs — needs object CRUD.
 resource "google_storage_bucket_iam_member" "github_deployer_staging" {
