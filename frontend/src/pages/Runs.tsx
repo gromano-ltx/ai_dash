@@ -126,7 +126,10 @@ export function Runs() {
                         onClick={(e) => e.stopPropagation()}
                         className="text-blue-400 hover:underline">
                         {prLabel(run.git_prs[0])}
-                        {run.git_prs.length > 1 && <span className="text-slate-500 ml-1">+{run.git_prs.length - 1}</span>}
+                        {/* commit count, not extra-PR count — a run can have far more
+                            commits than PRs, and that's the more useful number here */}
+                        {run.git_commits.length > 1 && <span className="text-slate-500 ml-1">({run.git_commits.length} commits)</span>}
+                        {run.git_prs.length > 1 && <span className="text-slate-500 ml-1">+{run.git_prs.length - 1} PR</span>}
                       </a>
                     : run.git_commits.length > 0
                     ? (() => {

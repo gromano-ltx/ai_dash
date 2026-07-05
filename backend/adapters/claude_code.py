@@ -95,19 +95,21 @@ def parse_transcript_content(
                                 github_repo = f"https://github.com/{m.group(1)}"
                             pending_remote_ids.discard(tid)
                         if tid in pending_commit_ids:
-                            m = COMMIT_HASH_RE.search(output)
-                            if m:
-                                git_commits.append(m.group(1))
+                            # findall, not search: a single Bash call can run `git commit`
+                            # more than once (e.g. a loop over several branches), and
+                            # search() would silently keep only the first hash.
+                            git_commits.extend(COMMIT_HASH_RE.findall(output))
                             pending_commit_ids.discard(tid)
                         if tid in pending_pr_ids:
-                            m = PR_URL_RE.search(output)
-                            if m:
-                                pr_url = m.group(0)
-                                git_prs.append(pr_url)
-                                if not github_repo:
-                                    repo_m = GITHUB_REPO_RE.match(pr_url)
-                                    if repo_m:
-                                        github_repo = f"https://github.com/{repo_m.group(1)}"
+                            # Same reasoning as above: a single Bash call can invoke
+                            # `gh pr create` multiple times (or print several PR URLs,
+                            # e.g. via `gh pr list`), so capture all of them.
+                            pr_urls = PR_URL_RE.findall(output)
+                            git_prs.extend(pr_urls)
+                            if pr_urls and not github_repo:
+                                repo_m = GITHUB_REPO_RE.match(pr_urls[0])
+                                if repo_m:
+                                    github_repo = f"https://github.com/{repo_m.group(1)}"
                             pending_pr_ids.discard(tid)
                     elif item.get('type') == 'text' and not first_user_text:
                         text = item.get('text', '').strip()
