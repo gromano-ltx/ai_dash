@@ -275,3 +275,14 @@ resource "google_project_iam_member" "github_deployer_logging" {
   role    = "roles/logging.viewer"
   member  = "serviceAccount:${google_service_account.github_deployer.email}"
 }
+
+# Discovered by actually running the pipeline: gcloud builds submit attributes
+# the source upload's API usage/quota to the project, which requires
+# serviceusage.services.use — a distinct permission from bucket object access.
+# Without it: "forbidden from accessing the bucket ... check ... if the user
+# has the serviceusage.services.use permission".
+resource "google_project_iam_member" "github_deployer_serviceusage" {
+  project = var.project_id
+  role    = "roles/serviceusage.serviceUsageConsumer"
+  member  = "serviceAccount:${google_service_account.github_deployer.email}"
+}
