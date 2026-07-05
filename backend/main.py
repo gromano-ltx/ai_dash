@@ -84,10 +84,19 @@ app.add_middleware(
 )
 
 
+_PUBLIC_PATHS = frozenset({"/install.sh", "/collector.py"})
+
+
 @app.middleware("http")
 async def basic_auth(request: Request, call_next):
-    # ingest has its own API key auth; skip basic auth for it
-    if not _DASHBOARD_PASSWORD or request.url.path.startswith("/api/v1/ingest"):
+    # ingest has its own API key auth; the installer + collector download
+    # routes must be fetchable by a brand-new user who doesn't have the
+    # dashboard password yet — skip basic auth for all three.
+    if (
+        not _DASHBOARD_PASSWORD
+        or request.url.path.startswith("/api/v1/ingest")
+        or request.url.path in _PUBLIC_PATHS
+    ):
         return await call_next(request)
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Basic "):
