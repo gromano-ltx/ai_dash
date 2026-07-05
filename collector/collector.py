@@ -50,7 +50,7 @@ def _setup_logging(log_dir: Path = CONFIG_DIR, name: str = "ai_dash.collector") 
     return log_logger
 
 
-logger = _setup_logging()
+logger = logging.getLogger("ai_dash.collector")
 
 
 def _ensure_deps() -> tuple[bool, bool]:
@@ -351,6 +351,7 @@ async def watch(url: str, key: str):
 
 
 def main():
+    _setup_logging()
     cfg = load_config()
     url = cfg.get("url", "").rstrip("/")
     key = cfg.get("key", "")

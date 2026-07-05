@@ -67,8 +67,13 @@ import watchfiles
 
 
 def test_setup_logging_configures_rotating_file_handler(tmp_path):
+    # Deliberately NOT a dotted child of "ai_dash.collector" (e.g. not
+    # "ai_dash.collector.test_rotating") — a child logger propagates its
+    # records up to the parent's handlers by default, which would make any
+    # `.info()`/`.error()` call on this test logger also write into the real
+    # production logger's real ~/.ai_dash/collector.log.
     test_logger = collector_mod._setup_logging(
-        log_dir=tmp_path, name="ai_dash.collector.test_rotating"
+        log_dir=tmp_path, name="test_ai_dash_rotating_config"
     )
 
     file_handlers = [
@@ -89,6 +94,14 @@ def test_watch_falls_back_to_polling_on_awatch_runtime_failure(
     monkeypatch.setattr(collector_mod, "STATE_FILE", tmp_path / "state.json")
     monkeypatch.setattr(collector_mod, "TRANSCRIPTS_BASE", tmp_path)
 
+    # Redirect the module's logger to a fully isolated one (same reasoning as
+    # above) so watch()'s internal logger.info/error calls never touch the
+    # real ~/.ai_dash/collector.log during this test.
+    test_logger = collector_mod._setup_logging(
+        log_dir=tmp_path, name="test_ai_dash_watch_fallback"
+    )
+    monkeypatch.setattr(collector_mod, "logger", test_logger)
+
     async def fake_awatch(path):
         raise RuntimeError("_rust_notify broken")
         yield  # pragma: no cover — makes this an async generator function
@@ -102,7 +115,7 @@ def test_watch_falls_back_to_polling_on_awatch_runtime_failure(
         lambda url, key: fallback_calls.append((url, key)),
     )
 
-    caplog.set_level("ERROR")
+    caplog.set_level("ERROR", logger="test_ai_dash_watch_fallback")
     asyncio.run(collector_mod.watch("https://example.test", "test-key"))
 
     assert fallback_calls == [("https://example.test", "test-key")]
