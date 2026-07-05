@@ -213,3 +213,48 @@ resource "google_cloud_run_v2_service_iam_member" "public" {
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
+
+# ── GitHub Actions Workload Identity Federation (AI-18 auto-deploy) ────────────
+
+resource "google_iam_workload_identity_pool" "github" {
+  workload_identity_pool_id = "github-actions"
+  display_name              = "GitHub Actions"
+  depends_on                = [google_project_service.apis]
+}
+
+resource "google_iam_workload_identity_pool_provider" "github" {
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  display_name                       = "GitHub"
+
+  attribute_mapping = {
+    "google.subject"       = "assertion.sub"
+    "attribute.repository" = "assertion.repository"
+    "attribute.ref"        = "assertion.ref"
+  }
+  # Only pushes to main on this exact repo can mint a usable token.
+  attribute_condition = "assertion.repository == \"gromano-ltx/ai_dash\" && assertion.ref == \"refs/heads/main\""
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
+resource "google_service_account" "github_deployer" {
+  account_id   = "github-deployer"
+  display_name = "GitHub Actions deployer (AI-18)"
+}
+
+# Enough to submit builds; the build itself runs as Cloud Build's own service
+# account, which already has roles/run.admin from the existing Terraform above.
+resource "google_project_iam_member" "github_deployer_cloudbuild" {
+  project = var.project_id
+  role    = "roles/cloudbuild.builds.editor"
+  member  = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
+resource "google_service_account_iam_member" "github_deployer_wif" {
+  service_account_id = google_service_account.github_deployer.name
+  role                = "roles/iam.workloadIdentityUser"
+  member              = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/gromano-ltx/ai_dash"
+}
