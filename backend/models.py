@@ -15,6 +15,10 @@ class AgentRun(SQLModel, table=True):
     status: str = "running"
     started_at: datetime = Field(default_factory=datetime.utcnow)
     ended_at: Optional[datetime] = None
+    # Last time this row was actually re-parsed/upserted — distinct from
+    # started_at (fixed at session creation). Used by the stale-run cleanup
+    # to detect true inactivity instead of penalizing long-but-active runs.
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     input_tokens: int = 0
     output_tokens: int = 0
     label: str = ""
