@@ -131,12 +131,21 @@ def _seed():
             # marks done (status == "running"); a row the old, pre-fix sweep
             # already flipped to "done" is skipped forever otherwise, since
             # it's no longer "running" by the time the fixed sweep looks.
+            #
+            # Only backfill when updated_at is actually known: falling back
+            # to started_at would make ended_at == started_at, fabricating a
+            # false 0s duration for a row we simply have no real data for —
+            # leaving ended_at null (still "unknown") is more honest than that.
             stuck = session.exec(
-                select(AgentRun).where(AgentRun.status == "done", AgentRun.ended_at == None)  # noqa: E711
+                select(AgentRun).where(
+                    AgentRun.status == "done",
+                    AgentRun.ended_at == None,  # noqa: E711
+                    AgentRun.updated_at != None,  # noqa: E711
+                )
             ).all()
             if stuck:
                 for r in stuck:
-                    r.ended_at = r.updated_at or r.started_at
+                    r.ended_at = r.updated_at
                     session.add(r)
                 session.commit()
                 print(f"[db] backfilled ended_at for {len(stuck)} runs stuck done with null duration")
