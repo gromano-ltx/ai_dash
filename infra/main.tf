@@ -273,12 +273,34 @@ resource "google_storage_bucket_iam_member" "github_deployer_staging" {
 # objectAdmin doesn't include it; legacyBucketReader adds exactly buckets.get
 # + read-only listing, without storage.admin's extra bucket-management
 # permissions (delete, setIamPolicy, update) that aren't needed here.
-# Confirmed missing by two actual failed live runs ("forbidden from
-# accessing the bucket") even after objectAdmin was granted.
 resource "google_storage_bucket_iam_member" "github_deployer_staging_reader" {
   bucket = "${var.project_id}_cloudbuild"
   role   = "roles/storage.legacyBucketReader"
   member = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
+# Reproduced the exact failing call locally with --verbosity=debug (impersonating
+# github-deployer, against a harmless throwaway build config, no real deploy
+# triggered): gcloud builds submit does a project-level bucket search —
+# GET .../b?prefix=<bucket>&project=<project> — before ever touching the named
+# bucket directly. GCP's own error was explicit: "does not have
+# storage.buckets.list access to the Google Cloud project." buckets.list is a
+# project-scoped operation (search across all buckets by prefix); no
+# bucket-scoped IAM binding can grant it regardless of role — confirmed
+# unrelated to the two grants above, which is why they didn't fix this.
+# No predefined role grants only this one permission at project scope without
+# pulling in unrelated admin capabilities, so a custom role holds exactly it.
+resource "google_project_iam_custom_role" "github_deployer_bucket_lister" {
+  role_id     = "githubDeployerBucketLister"
+  title       = "GitHub Deployer Bucket Lister"
+  description = "Exactly storage.buckets.list, for gcloud builds submit's project-level staging-bucket lookup (AI-18)"
+  permissions = ["storage.buckets.list"]
+}
+
+resource "google_project_iam_member" "github_deployer_bucket_list" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.github_deployer_bucket_lister.id
+  member  = "serviceAccount:${google_service_account.github_deployer.email}"
 }
 
 # `gcloud builds submit` streams build logs and polls for completion, which
