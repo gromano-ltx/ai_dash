@@ -1,6 +1,12 @@
 import os
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
+
+# Picks up DATABASE_URL from a local .env file (see .env.example) so local
+# dev can point at the docker-compose Postgres instead of the SQLite
+# fallback below, matching production (Cloud SQL/Postgres) more closely.
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ai_dash.db")
 engine = create_engine(DATABASE_URL)
