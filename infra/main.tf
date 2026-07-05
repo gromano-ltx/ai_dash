@@ -258,3 +258,20 @@ resource "google_service_account_iam_member" "github_deployer_wif" {
   role                = "roles/iam.workloadIdentityUser"
   member              = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/gromano-ltx/ai_dash"
 }
+
+# `gcloud builds submit` tarballs the local source and uploads it to Cloud
+# Build's staging bucket before Cloud Build ever runs; grant object-level
+# access to that bucket only (least privilege, not full bucket admin).
+resource "google_storage_bucket_iam_member" "github_deployer_staging" {
+  bucket = "${var.project_id}_cloudbuild"
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
+# `gcloud builds submit` streams build logs and polls for completion, which
+# requires read access to Cloud Logging (Cloud Build's default log sink).
+resource "google_project_iam_member" "github_deployer_logging" {
+  project = var.project_id
+  role    = "roles/logging.viewer"
+  member  = "serviceAccount:${google_service_account.github_deployer.email}"
+}
