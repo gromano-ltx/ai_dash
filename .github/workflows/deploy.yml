@@ -38,4 +38,10 @@ jobs:
           service_account: "github-deployer@devops-ai-tools.iam.gserviceaccount.com"
 
       - name: Deploy via Cloud Build
-        run: gcloud builds submit --config cloudbuild.yaml .
+        # --suppress-logs: streaming build logs needs read access to Cloud
+        # Build's Google-managed default logs bucket, which requires
+        # project Viewer/Owner — broader than github-deployer should have.
+        # Still waits for the build and reports its real exit code, unlike
+        # --async (which would return immediately without confirming
+        # success/failure — no good for gating a deploy).
+        run: gcloud builds submit --config cloudbuild.yaml --suppress-logs .
