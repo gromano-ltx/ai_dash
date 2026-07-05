@@ -5,7 +5,7 @@ import { fmt, duration } from "../lib/format";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { useNavigate } from "react-router-dom";
-import { ticketUrl, prLabel, commitUrl } from "../lib/links";
+import { ticketUrl, prLabel, commitUrl, repoBase } from "../lib/links";
 
 const PAGE_SIZE = 50;
 
@@ -109,7 +109,11 @@ export function Runs() {
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{duration(run.duration_seconds)}</td>
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{fmt(run.input_tokens + run.output_tokens)}</td>
                 <td className="px-4 py-3 text-xs font-mono">
-                  {run.ticket_refs[0]
+                  {/* 2+ tickets: an aggregate count, not "the first one" — a long
+                      session can genuinely touch many unrelated tickets. */}
+                  {run.ticket_refs.length > 1
+                    ? <span className="text-violet-400">{run.ticket_refs.length} tickets</span>
+                    : run.ticket_refs[0]
                     ? (() => {
                         const url = ticketUrl(run.ticket_refs[0]);
                         return url
@@ -121,15 +125,24 @@ export function Runs() {
                     : <span className="text-slate-600">—</span>}
                 </td>
                 <td className="px-4 py-3 text-xs font-mono">
-                  {run.git_prs.length > 0
+                  {/* Same reasoning: 2+ PRs get an honest aggregate instead of
+                      picking git_prs[0] as if it were "the" PR for this run. */}
+                  {run.git_prs.length > 1
+                    ? (() => {
+                        const base = repoBase(run.git_prs[0]);
+                        const label = `${run.git_prs.length} PRs · ${run.git_commits.length} commits`;
+                        return base
+                          ? <a href={`${base}/pulls`} target="_blank" rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-400 hover:underline">{label}</a>
+                          : <span className="text-slate-300">{label}</span>;
+                      })()
+                    : run.git_prs.length > 0
                     ? <a href={run.git_prs[0]} target="_blank" rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
                         className="text-blue-400 hover:underline">
                         {prLabel(run.git_prs[0])}
-                        {/* commit count, not extra-PR count — a run can have far more
-                            commits than PRs, and that's the more useful number here */}
                         {run.git_commits.length > 1 && <span className="text-slate-500 ml-1">({run.git_commits.length} commits)</span>}
-                        {run.git_prs.length > 1 && <span className="text-slate-500 ml-1">+{run.git_prs.length - 1} PR</span>}
                       </a>
                     : run.git_commits.length > 0
                     ? (() => {
