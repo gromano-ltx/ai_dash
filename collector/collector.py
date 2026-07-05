@@ -85,7 +85,9 @@ def load_state() -> dict:
 
 def save_state(state: dict):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state))
+    tmp_path = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(state))
+    os.replace(tmp_path, STATE_FILE)
 
 
 # ── stdlib path (polling + urllib) ───────────────────────────────────────────
