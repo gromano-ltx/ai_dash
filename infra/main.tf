@@ -33,6 +33,7 @@ resource "google_project_service" "apis" {
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
     "secretmanager.googleapis.com",
+    "servicenetworking.googleapis.com",
   ])
   service            = each.key
   disable_on_destroy = false
@@ -49,6 +50,31 @@ resource "google_artifact_registry_repository" "app" {
 
 # ── Cloud SQL ─────────────────────────────────────────────────────────────────
 
+data "google_compute_network" "default" {
+  name = "default"
+}
+
+data "google_compute_subnetwork" "default" {
+  name   = "default"
+  region = var.region
+}
+
+# Private services access peering, required for Cloud SQL private IP (AI-44)
+resource "google_compute_global_address" "private_ip_range" {
+  name          = "${local.service_name}-private-ip"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = 16
+  network       = data.google_compute_network.default.id
+}
+
+resource "google_service_networking_connection" "private_vpc_connection" {
+  network                 = data.google_compute_network.default.id
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.private_ip_range.name]
+  depends_on              = [google_project_service.apis]
+}
+
 resource "google_sql_database_instance" "main" {
   name             = "${local.service_name}-db"
   database_version = "POSTGRES_15"
@@ -60,10 +86,11 @@ resource "google_sql_database_instance" "main" {
       enabled = true
     }
     ip_configuration {
-      ipv4_enabled = true       # Cloud Run uses Cloud SQL Auth Proxy unix socket
+      ipv4_enabled    = false   # AI-44: private IP only, Cloud Run reaches it via direct VPC egress
+      private_network = data.google_compute_network.default.self_link
     }
   }
-  depends_on = [google_project_service.apis]
+  depends_on = [google_project_service.apis, google_service_networking_connection.private_vpc_connection]
 }
 
 resource "google_sql_database" "app" {
@@ -160,6 +187,16 @@ resource "google_cloud_run_v2_service" "app" {
       cloud_sql_instance {
         instances = [local.db_instance]
       }
+    }
+
+    # AI-44: direct VPC egress so Cloud Run can still reach Cloud SQL now that
+    # the instance has no public IP.
+    vpc_access {
+      network_interfaces {
+        network    = data.google_compute_network.default.name
+        subnetwork = data.google_compute_subnetwork.default.name
+      }
+      egress = "PRIVATE_RANGES_ONLY"
     }
 
     containers {

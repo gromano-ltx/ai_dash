@@ -80,7 +80,17 @@ The collector watches `~/.claude/projects/` and ships transcripts to the server.
 python -m collector.collector
 ```
 
-**Run as a background service** — see `install.sh` for launchd (macOS) / systemd (Linux) setup.
+**Run as a background service (recommended)** — the installer creates a dedicated virtualenv
+(isolated from any other Python project on your machine), downloads the collector, and registers
+it as a launchd (macOS) / systemd (Linux) service that restarts automatically and logs to
+`~/.ai_dash/collector.log` (rotated at 5MB × 3 backups, ~20MB max):
+
+```bash
+curl -fsSL https://dash.ai-coordinator.io/install.sh | bash
+```
+
+Re-running the command is safe — it reuses the existing virtualenv and config, and just refreshes
+the collector code and service definition.
 
 ---
 

@@ -1,0 +1,28 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Backend import check
+        run: |
+          pip install -e .
+          python -c "import backend.main"
+
+      - name: Collector tests
+        run: |
+          pip install pytest httpx watchfiles
+          python -m pytest collector/test_collector.py -v
+
+      - name: Frontend typecheck + build
+        working-directory: frontend
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm run build
