@@ -1,9 +1,12 @@
+import logging
 import os
 from datetime import datetime, timedelta
 from sqlmodel import SQLModel, create_engine, Session, select
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ai_dash.db")
 engine = create_engine(DATABASE_URL)
+
+logger = logging.getLogger(__name__)
 
 
 def init_db():
@@ -41,31 +44,37 @@ def _seed():
             session.commit()
             if deleted.rowcount:
                 print(f"[db] cleaned up {deleted.rowcount} subagent/stub sessions")
-            # Clean up git_commits/git_prs that stored bash commands instead of hashes/URLs
+            # Clean up git_commits/git_prs that stored bash commands instead of hashes/URLs.
+            # Done in Python (rather than dialect-specific SQL like Postgres's ::json casts
+            # and jsonb `-` operator) so it works on both SQLite and Postgres — the previous
+            # Postgres-only SQL raised on the default SQLite engine and was silently rolled
+            # back by a bare except, so this cleanup never actually ran.
             try:
-                session.exec(text(
-                    "UPDATE agent_runs SET git_commits = '[]'::json "
-                    "WHERE git_commits::text != '[]' "
-                    "AND git_commits::text LIKE '%\"git %'"
-                ))
-                session.exec(text(
-                    "UPDATE agent_runs SET git_prs = '[]'::json "
-                    "WHERE git_prs::text != '[]' "
-                    "AND git_prs::text NOT LIKE '%https://%'"
-                ))
-                # Clear github_repo from meta where it's the placeholder seed URL
-                session.exec(text(
-                    "UPDATE agent_runs SET meta = meta - 'github_repo' "
-                    "WHERE meta->>'github_repo' = 'https://github.com/org/repo'"
-                ))
-                # Null out single-word task descriptions (e.g. "pwd", "ls") — not meaningful
-                session.exec(text(
-                    "UPDATE agent_runs SET task_description = NULL "
-                    "WHERE task_description IS NOT NULL "
-                    "AND task_description NOT LIKE '% %'"
-                ))
+                for run in session.exec(select(AgentRun)).all():
+                    dirty = False
+                    if run.git_commits and any(
+                        isinstance(c, str) and c.startswith("git ") for c in run.git_commits
+                    ):
+                        run.git_commits = []
+                        dirty = True
+                    if run.git_prs and not any(
+                        isinstance(p, str) and "https://" in p for p in run.git_prs
+                    ):
+                        run.git_prs = []
+                        dirty = True
+                    # Clear github_repo from meta where it's the placeholder seed URL
+                    if isinstance(run.meta, dict) and run.meta.get("github_repo") == "https://github.com/org/repo":
+                        run.meta = {k: v for k, v in run.meta.items() if k != "github_repo"}
+                        dirty = True
+                    # Null out single-word task descriptions (e.g. "pwd", "ls") — not meaningful
+                    if run.task_description is not None and " " not in run.task_description:
+                        run.task_description = None
+                        dirty = True
+                    if dirty:
+                        session.add(run)
                 session.commit()
             except Exception:
+                logger.exception("[db] failed to clean up malformed agent_runs data")
                 session.rollback()
         if session.exec(select(AgentRun)).first():
             return
