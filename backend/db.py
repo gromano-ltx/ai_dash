@@ -1,6 +1,5 @@
 import logging
 import os
-from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from sqlmodel import SQLModel, create_engine, Session, select
 
@@ -13,6 +12,19 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ai_dash.db")
 engine = create_engine(DATABASE_URL)
 
 logger = logging.getLogger(__name__)
+
+# (user, label) pairs of the fake demo runs _seed() used to insert on first
+# deploy, before real data existed. Kept here so the one-time cleanup below
+# can identify and remove them precisely.
+_SEED_DEMO_ROWS = frozenset({
+    ("gabby", "Fix authentication bug in login flow"),
+    ("marco", "Add dark mode support to dashboard"),
+    ("gabby", "Refactor payment service to use new Stripe API"),
+    ("alex", "Generate API documentation from route definitions"),
+    ("marco", "Write unit tests for user service"),
+    ("gabby", "Optimize database queries in reporting module"),
+    ("alex", "Migrate legacy config files to new format"),
+})
 
 
 def init_db():
@@ -82,88 +94,17 @@ def _seed():
             except Exception:
                 logger.exception("[db] failed to clean up malformed agent_runs data")
                 session.rollback()
-        if session.exec(select(AgentRun)).first():
-            return
-        now = datetime.utcnow()
-        runs = [
-            AgentRun(
-                provider="anthropic", model="claude-sonnet-4-6", status="done",
-                label="Fix authentication bug in login flow",
-                task_description="Fix the JWT token expiry issue causing users to be logged out prematurely",
-                user="gabby",
-                git_commits=["a1b2c3d", "e4f5g6h"],
-                git_prs=["https://github.com/org/repo/pull/142"],
-                ticket_refs=["LINEAR-234"],
-                input_tokens=45230, output_tokens=8920,
-                started_at=now - timedelta(hours=2),
-                ended_at=now - timedelta(hours=1, minutes=45),
-            ),
-            AgentRun(
-                provider="openai", model="gpt-4o", status="done",
-                label="Add dark mode support to dashboard",
-                task_description="Implement dark mode toggle with system preference detection",
-                user="marco",
-                git_commits=["i7j8k9l"],
-                git_prs=[],
-                ticket_refs=["LINEAR-198"],
-                input_tokens=32100, output_tokens=6500,
-                started_at=now - timedelta(hours=4),
-                ended_at=now - timedelta(hours=3, minutes=40),
-            ),
-            AgentRun(
-                provider="anthropic", model="claude-opus-4-8", status="running",
-                label="Refactor payment service to use new Stripe API",
-                task_description="Migrate from Stripe v2 to v3 API, update webhook handlers",
-                user="gabby",
-                ticket_refs=["LINEAR-267"],
-                input_tokens=12400, output_tokens=3100,
-                started_at=now - timedelta(minutes=20),
-            ),
-            AgentRun(
-                provider="gemini", model="gemini-2.0-flash", status="failed",
-                label="Generate API documentation from route definitions",
-                task_description="Auto-generate OpenAPI docs from existing FastAPI route definitions",
-                user="alex",
-                ticket_refs=["JIRA-89"],
-                input_tokens=18900, output_tokens=2200,
-                started_at=now - timedelta(hours=1),
-                ended_at=now - timedelta(minutes=50),
-            ),
-            AgentRun(
-                provider="openai", model="gpt-4o-mini", status="done",
-                label="Write unit tests for user service",
-                task_description="Add comprehensive unit tests for the user authentication service",
-                user="marco",
-                git_commits=["m1n2o3p", "q4r5s6t", "u7v8w9x"],
-                git_prs=["https://github.com/org/repo/pull/138"],
-                ticket_refs=["LINEAR-201"],
-                input_tokens=28700, output_tokens=9300,
-                started_at=now - timedelta(hours=6),
-                ended_at=now - timedelta(hours=5, minutes=30),
-            ),
-            AgentRun(
-                provider="anthropic", model="claude-sonnet-4-6", status="done",
-                label="Optimize database queries in reporting module",
-                task_description="Add indexes and rewrite N+1 queries in the reports endpoint",
-                user="gabby",
-                git_commits=["y1z2a3b"],
-                git_prs=["https://github.com/org/repo/pull/135"],
-                ticket_refs=["LINEAR-189"],
-                input_tokens=22100, output_tokens=5400,
-                started_at=now - timedelta(hours=8),
-                ended_at=now - timedelta(hours=7, minutes=45),
-            ),
-            AgentRun(
-                provider="gemini", model="gemini-2.0-pro", status="done",
-                label="Migrate legacy config files to new format",
-                user="alex",
-                git_commits=["c4d5e6f", "g7h8i9j"],
-                ticket_refs=["LINEAR-212"],
-                input_tokens=15600, output_tokens=4100,
-                started_at=now - timedelta(days=1),
-                ended_at=now - timedelta(hours=23),
-            ),
-        ]
-        for run in runs:
-            session.add(run)
-        session.commit()
+            # One-time cleanup: delete the fake runs _seed() used to insert on
+            # first deploy (before real data existed). Matched on the exact
+            # (user, label) pairs those rows were created with, so this can
+            # never touch real data — a real run would have to coincidentally
+            # share both a fake demo username and its exact synthetic label.
+            to_delete = [
+                r for r in session.exec(select(AgentRun)).all()
+                if (r.user, r.label) in _SEED_DEMO_ROWS
+            ]
+            if to_delete:
+                for r in to_delete:
+                    session.delete(r)
+                session.commit()
+                print(f"[db] removed {len(to_delete)} seed/demo rows")
