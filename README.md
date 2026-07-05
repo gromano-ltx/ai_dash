@@ -44,6 +44,10 @@ The **collector** runs locally, watches your Claude Code transcript files, and s
 ## Local development
 
 ```bash
+# Postgres (matches production; run once, keeps running in the background)
+docker compose up -d
+cp .env.example .env
+
 # Backend
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -52,6 +56,10 @@ uvicorn backend.main:app --reload
 # Frontend (separate terminal)
 cd frontend && npm install && npm run dev
 ```
+
+Without the `docker compose up -d` + `.env` step, the backend falls back to a local
+`sqlite:///./ai_dash.db` file — fine for a quick look, but it can drift from Postgres-only
+behavior, so prefer the Postgres setup above for anything beyond a quick check.
 
 Frontend: http://localhost:5173  
 Backend API: http://localhost:8000
