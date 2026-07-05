@@ -46,6 +46,10 @@ def parse_transcript_content(
     first_user_text = None
     git_commits: list[str] = []
     git_prs: list[str] = []
+    # Ticket refs are searched for in this text too — in a session that
+    # touches several tickets, the ref usually shows up in a commit message,
+    # branch name, or PR title/body rather than the first user message.
+    bash_commands: list[str] = []
 
     seen_request_ids: set[str] = set()
     pending_commit_ids: set[str] = set()
@@ -147,6 +151,7 @@ def parse_transcript_content(
                             pending_pr_ids.add(tid)
                         if (GIT_PUSH_RE.search(cmd) or GIT_REMOTE_RE.search(cmd)) and tid:
                             pending_remote_ids.add(tid)
+                        bash_commands.append(cmd)
 
     # isMeta/ai-title events are rare; most transcript lines carry sessionId regardless
     # of event type, so fall back to that for stable run identity across ingests.
@@ -163,7 +168,7 @@ def parse_transcript_content(
 
     ended_at = last_assistant_ts if status == "done" else None
 
-    search_text = ' '.join(filter(None, [git_branch, first_user_text, label]))
+    search_text = ' '.join(filter(None, [git_branch, first_user_text, label] + bash_commands))
     ticket_refs = _extract_tickets(search_text)
 
     return AgentRun(
