@@ -56,3 +56,57 @@ def test_save_state_overwrites_existing_content(tmp_path, monkeypatch):
     collector_mod.save_state({"new": {"mtime": 2.0, "offset": 20}})
 
     assert json.loads(state_file.read_text()) == {"new": {"mtime": 2.0, "offset": 20}}
+
+
+import asyncio
+import logging
+import logging.handlers
+import os
+
+import watchfiles
+
+
+def test_setup_logging_configures_rotating_file_handler(tmp_path):
+    test_logger = collector_mod._setup_logging(
+        log_dir=tmp_path, name="ai_dash.collector.test_rotating"
+    )
+
+    file_handlers = [
+        h for h in test_logger.handlers
+        if isinstance(h, logging.handlers.RotatingFileHandler)
+    ]
+    assert len(file_handlers) == 1
+    handler = file_handlers[0]
+    assert handler.maxBytes == 5 * 1024 * 1024
+    assert handler.backupCount == 3
+    assert handler.baseFilename == os.path.abspath(str(tmp_path / "collector.log"))
+
+
+def test_watch_falls_back_to_polling_on_awatch_runtime_failure(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setattr(collector_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(collector_mod, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(collector_mod, "TRANSCRIPTS_BASE", tmp_path)
+
+    async def fake_awatch(path):
+        raise RuntimeError("_rust_notify broken")
+        yield  # pragma: no cover — makes this an async generator function
+
+    monkeypatch.setattr(watchfiles, "awatch", fake_awatch)
+
+    fallback_calls = []
+    monkeypatch.setattr(
+        collector_mod,
+        "_watch_poll",
+        lambda url, key: fallback_calls.append((url, key)),
+    )
+
+    caplog.set_level("ERROR")
+    asyncio.run(collector_mod.watch("https://example.test", "test-key"))
+
+    assert fallback_calls == [("https://example.test", "test-key")]
+    assert any(
+        "falling back to stdlib polling" in record.message
+        for record in caplog.records
+    )

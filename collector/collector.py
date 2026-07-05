@@ -14,6 +14,8 @@ If pip is unavailable, falls back to stdlib urllib + 10-second polling.
 import asyncio
 import gzip
 import json
+import logging
+import logging.handlers
 import os
 import ssl
 import subprocess
@@ -27,6 +29,28 @@ CONFIG_DIR = Path.home() / ".ai_dash"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 STATE_FILE = CONFIG_DIR / "state.json"
 TRANSCRIPTS_BASE = Path.home() / ".claude" / "projects"
+
+LOG_FILE = CONFIG_DIR / "collector.log"
+
+
+def _setup_logging(log_dir: Path = CONFIG_DIR, name: str = "ai_dash.collector") -> logging.Logger:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_logger = logging.getLogger(name)
+    log_logger.setLevel(logging.INFO)
+    if not log_logger.handlers:
+        formatter = logging.Formatter("%(asctime)s %(message)s")
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_dir / "collector.log", maxBytes=5 * 1024 * 1024, backupCount=3
+        )
+        file_handler.setFormatter(formatter)
+        log_logger.addHandler(file_handler)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        log_logger.addHandler(stream_handler)
+    return log_logger
+
+
+logger = _setup_logging()
 
 
 def _ensure_deps() -> tuple[bool, bool]:
@@ -44,16 +68,16 @@ def _ensure_deps() -> tuple[bool, bool]:
     if not missing:
         return True, True
 
-    print(f"[ai-dash] installing missing packages: {', '.join(missing)}", file=sys.stderr)
+    logger.info(f"installing missing packages: {', '.join(missing)}")
     try:
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet"] + missing,
             check=True, capture_output=True,
         )
-        print(f"[ai-dash] installed {', '.join(missing)}", file=sys.stderr)
+        logger.info(f"installed {', '.join(missing)}")
         return True, True
     except Exception as exc:
-        print(f"[ai-dash] auto-install failed ({exc}), using stdlib fallback", file=sys.stderr)
+        logger.error(f"auto-install failed ({exc}), using stdlib fallback")
         has_httpx = "httpx" not in missing
         has_watchfiles = "watchfiles" not in missing
         return has_httpx, has_watchfiles
@@ -61,12 +85,12 @@ def _ensure_deps() -> tuple[bool, bool]:
 
 def load_config() -> dict:
     if not CONFIG_FILE.exists():
-        print(f"[ai-dash] No config at {CONFIG_FILE}. Create it with {{\"url\":\"...\",\"key\":\"...\"}}.", file=sys.stderr)
+        logger.error(f"No config at {CONFIG_FILE}. Create it with {{\"url\":\"...\",\"key\":\"...\"}}.")
         sys.exit(1)
     try:
         return json.loads(CONFIG_FILE.read_text())
     except Exception as exc:
-        print(f"[ai-dash] Config invalid: {exc}", file=sys.stderr)
+        logger.error(f"Config invalid: {exc}")
         sys.exit(1)
 
 
@@ -99,7 +123,7 @@ def _ship_urllib(
     try:
         raw_bytes = path.read_bytes()
     except Exception as exc:
-        print(f"[ai-dash] cannot read {path.name}: {exc}", file=sys.stderr)
+        logger.error(f"cannot read {path.name}: {exc}")
         return False, offset, 0
 
     new_bytes = raw_bytes[offset:]
@@ -124,20 +148,20 @@ def _ship_urllib(
         with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
             data = json.loads(resp.read())
         new_offset = offset + len(new_bytes)
-        print(
-            f"[ai-dash] {path.name} → {data.get('id', '?')} ({data.get('status', '?')})  "
+        logger.info(
+            f"{path.name} → {data.get('id', '?')} ({data.get('status', '?')})  "
             f"{len(new_bytes):,}B raw → {len(compressed):,}B gz"
         )
         return True, new_offset, len(compressed)
     except urllib.error.HTTPError as exc:
         text = exc.read().decode("utf-8", errors="replace")
         if exc.code == 400 and "Resend from offset 0" in text:
-            print(f"[ai-dash] server lost session for {path.name}, re-sending from offset 0")
+            logger.info(f"server lost session for {path.name}, re-sending from offset 0")
             return _ship_urllib(path, url, key, offset=0, mtime=mtime)
-        print(f"[ai-dash] server error {exc.code} for {path.name}", file=sys.stderr)
+        logger.error(f"server error {exc.code} for {path.name}")
         return False, offset, 0
     except Exception as exc:
-        print(f"[ai-dash] failed to ship {path.name}: {exc}", file=sys.stderr)
+        logger.error(f"failed to ship {path.name}: {exc}")
         return False, offset, 0
 
 
@@ -173,20 +197,20 @@ def _sync_all_stdlib(url: str, key: str, state: dict) -> dict:
 
     if total_raw:
         ratio = (1 - total_gz / total_raw) * 100
-        print(f"[ai-dash] sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
+        logger.info(f"sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
     return state
 
 
 def _watch_poll(url: str, key: str, interval: int = 10):
     state = load_state()
-    print(f"[ai-dash] starting (polling every {interval}s) — syncing to {url}")
+    logger.info(f"starting (polling every {interval}s) — syncing to {url}")
     state = _sync_all_stdlib(url, key, state)
     save_state(state)
 
     if not TRANSCRIPTS_BASE.exists():
-        print(f"[ai-dash] {TRANSCRIPTS_BASE} not found, will watch once it appears", file=sys.stderr)
+        logger.warning(f"{TRANSCRIPTS_BASE} not found, will watch once it appears")
 
-    print(f"[ai-dash] watching {TRANSCRIPTS_BASE}")
+    logger.info(f"watching {TRANSCRIPTS_BASE}")
     while True:
         try:
             time.sleep(interval)
@@ -197,7 +221,7 @@ def _watch_poll(url: str, key: str, interval: int = 10):
         except KeyboardInterrupt:
             raise
         except Exception as exc:
-            print(f"[ai-dash] poll error: {exc}", file=sys.stderr)
+            logger.error(f"poll error: {exc}")
 
 
 # ── async path (httpx + watchfiles) ─────────────────────────────────────────
@@ -209,7 +233,7 @@ async def ship(
     try:
         raw_bytes = path.read_bytes()
     except Exception as exc:
-        print(f"[ai-dash] cannot read {path.name}: {exc}", file=sys.stderr)
+        logger.error(f"cannot read {path.name}: {exc}")
         return False, offset, 0
 
     new_bytes = raw_bytes[offset:]
@@ -241,18 +265,18 @@ async def ship(
             if resp.status_code == 200:
                 data = resp.json()
                 new_offset = offset + len(new_bytes)
-                print(
-                    f"[ai-dash] {path.name} → {data.get('id', '?')} ({data.get('status', '?')})  "
+                logger.info(
+                    f"{path.name} → {data.get('id', '?')} ({data.get('status', '?')})  "
                     f"{len(new_bytes):,}B raw → {len(compressed):,}B gz"
                 )
                 return True, new_offset, len(compressed)
             elif resp.status_code == 400 and "Resend from offset 0" in resp.text:
-                print(f"[ai-dash] server lost session for {path.name}, re-sending from offset 0")
+                logger.info(f"server lost session for {path.name}, re-sending from offset 0")
                 return await ship(path, url, key, client, offset=0, mtime=mtime)
             else:
-                print(f"[ai-dash] server error {resp.status_code} for {path.name}", file=sys.stderr)
+                logger.error(f"server error {resp.status_code} for {path.name}")
         except Exception as exc:
-            print(f"[ai-dash] failed to ship {path.name}: {exc}", file=sys.stderr)
+            logger.error(f"failed to ship {path.name}: {exc}")
 
         if attempt < 2:
             await asyncio.sleep(2 ** attempt)
@@ -286,7 +310,7 @@ async def sync_all(url: str, key: str, state: dict, client) -> dict:
 
     if total_raw:
         ratio = (1 - total_gz / total_raw) * 100
-        print(f"[ai-dash] sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
+        logger.info(f"sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
     return state
 
 
@@ -296,30 +320,34 @@ async def watch(url: str, key: str):
 
     state = load_state()
     async with httpx.AsyncClient() as client:
-        print(f"[ai-dash] starting — syncing existing transcripts to {url}")
+        logger.info(f"starting — syncing existing transcripts to {url}")
         state = await sync_all(url, key, state, client)
         save_state(state)
 
         if not TRANSCRIPTS_BASE.exists():
-            print(f"[ai-dash] {TRANSCRIPTS_BASE} not found, will watch once it appears", file=sys.stderr)
+            logger.warning(f"{TRANSCRIPTS_BASE} not found, will watch once it appears")
             return
 
-        print(f"[ai-dash] watching {TRANSCRIPTS_BASE}")
-        async for changes in awatch(str(TRANSCRIPTS_BASE)):
-            changed = {Path(p) for _, p in changes if p.endswith(".jsonl")}
-            for path in changed:
-                try:
-                    stat = path.stat()
-                    mtime, size = stat.st_mtime, stat.st_size
-                except Exception:
-                    continue
-                key_str = str(path)
-                entry = state.get(key_str, {"mtime": 0, "offset": 0})
-                offset = entry["offset"] if size >= entry["offset"] else 0
-                ok, new_offset, _ = await ship(path, url, key, client, offset, mtime)
-                if ok:
-                    state[key_str] = {"mtime": mtime, "offset": new_offset}
-                    save_state(state)
+        logger.info(f"watching {TRANSCRIPTS_BASE}")
+        try:
+            async for changes in awatch(str(TRANSCRIPTS_BASE)):
+                changed = {Path(p) for _, p in changes if p.endswith(".jsonl")}
+                for path in changed:
+                    try:
+                        stat = path.stat()
+                        mtime, size = stat.st_mtime, stat.st_size
+                    except Exception:
+                        continue
+                    key_str = str(path)
+                    entry = state.get(key_str, {"mtime": 0, "offset": 0})
+                    offset = entry["offset"] if size >= entry["offset"] else 0
+                    ok, new_offset, _ = await ship(path, url, key, client, offset, mtime)
+                    if ok:
+                        state[key_str] = {"mtime": mtime, "offset": new_offset}
+                        save_state(state)
+        except Exception as exc:
+            logger.error(f"watchfiles failed at runtime ({exc}), falling back to stdlib polling")
+            _watch_poll(url, key)
 
 
 def main():
@@ -327,7 +355,7 @@ def main():
     url = cfg.get("url", "").rstrip("/")
     key = cfg.get("key", "")
     if not url or not key:
-        print("[ai-dash] Config missing 'url' or 'key'.", file=sys.stderr)
+        logger.error("Config missing 'url' or 'key'.")
         sys.exit(1)
 
     has_httpx, has_watchfiles = _ensure_deps()
@@ -338,7 +366,7 @@ def main():
         else:
             _watch_poll(url, key)
     except KeyboardInterrupt:
-        print("\n[ai-dash] stopped.")
+        logger.info("stopped.")
 
 
 if __name__ == "__main__":
