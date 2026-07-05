@@ -38,10 +38,28 @@ jobs:
           service_account: "github-deployer@devops-ai-tools.iam.gserviceaccount.com"
 
       - name: Deploy via Cloud Build
-        # --suppress-logs: streaming build logs needs read access to Cloud
-        # Build's Google-managed default logs bucket, which requires
-        # project Viewer/Owner — broader than github-deployer should have.
-        # Still waits for the build and reports its real exit code, unlike
-        # --async (which would return immediately without confirming
-        # success/failure — no good for gating a deploy).
-        run: gcloud builds submit --config cloudbuild.yaml --suppress-logs .
+        # gcloud builds submit's wait/stream mechanism needs read access to
+        # Cloud Build's Google-managed default logs bucket even with
+        # --suppress-logs (confirmed live: identical "Viewer/Owner of the
+        # project" error either way) — broader than github-deployer should
+        # have, and not a bucket we can grant IAM on ourselves. Submitting
+        # --async and polling status via `builds describe` avoids that
+        # entirely: cloudbuild.builds.editor (already granted) includes
+        # builds.get/.list, no log-bucket access needed at all.
+        run: |
+          BUILD_ID=$(gcloud builds submit --config cloudbuild.yaml --async --format="value(id)" .)
+          echo "Cloud Build ID: $BUILD_ID"
+          for i in $(seq 1 120); do
+            STATUS=$(gcloud builds describe "$BUILD_ID" --format="value(status)")
+            echo "Status: $STATUS"
+            case "$STATUS" in
+              SUCCESS) exit 0 ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
+                echo "Build failed with status: $STATUS" >&2
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          echo "Timed out waiting for build to complete" >&2
+          exit 1
