@@ -44,3 +44,8 @@ export interface Stats {
   running_count: number;
   by_provider: Record<string, ProviderStats>;
 }
+
+export interface Me {
+  username: string | null;
+  is_admin: boolean;
+}
