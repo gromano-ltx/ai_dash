@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from backend.db import init_db
 from backend.api.routes import router
+from backend.api.auth_routes import router as auth_router
 from backend import watcher
 
 _ROOT = Path(__file__).parent.parent
@@ -110,6 +111,7 @@ async def basic_auth(request: Request, call_next):
 
 
 app.include_router(router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 
 @app.get("/collector.py")
