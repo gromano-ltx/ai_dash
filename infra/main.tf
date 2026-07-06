@@ -78,10 +78,11 @@ resource "google_service_networking_connection" "private_vpc_connection" {
 resource "google_sql_database_instance" "main" {
   name             = "${local.service_name}-db"
   database_version = "POSTGRES_15"
-  deletion_protection = false   # ponytail: set true in production
+  deletion_protection = true
 
   settings {
-    tier = "db-f1-micro"        # ponytail: upgrade for >10 users
+    tier                        = "db-f1-micro" # ponytail: upgrade for >10 users
+    deletion_protection_enabled = true
     backup_configuration {
       enabled = true
     }
@@ -241,6 +242,16 @@ resource "google_cloud_run_v2_service" "app" {
     google_artifact_registry_repository.app,
     google_sql_database_instance.main,
   ]
+
+  # AI-39: Terraform only sets the initial image on first-ever creation.
+  # After that, CI (cloudbuild.yaml) deploys SHA-pinned images directly via
+  # `gcloud run deploy` — without this, a later `terraform apply` (for any
+  # unrelated change) would see the CI-deployed image as drift relative to
+  # the hardcoded ":latest" below and silently revert the running service
+  # to a stale image.
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
 }
 
 # Public access — dashboard is protected by DASHBOARD_PASSWORD
