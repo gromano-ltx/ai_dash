@@ -143,6 +143,10 @@ def parse_transcript_content(
                     git_commits, git_prs, github_repo,
                 )
 
+    # agent_id is always None for this adapter (kept only for signature parity
+    # with claude_code.py/codex.py) — Gemini subagent sessions already have a
+    # globally-unique sessionId, so parent/child linkage is carried entirely
+    # by parent_id (via the collector's X-Parent-Id header), not agent_id.
     run_id = (f"agent-{agent_id}" if agent_id else None) or session_id or str(uuid.uuid4())
 
     if mtime is not None:
