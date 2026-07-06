@@ -47,6 +47,14 @@ class ApiKey(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+    username: str = Field(primary_key=True)
+    password_hash: str
+    is_admin: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class AgentRunRead(SQLModel):
     id: str
     provider: str
