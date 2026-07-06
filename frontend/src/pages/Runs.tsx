@@ -81,7 +81,8 @@ export function Runs() {
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
           <thead>
             <tr className="border-b border-slate-800">
               {["Task", "Provider", "Model", "User", "Status", "Duration", "Tokens", "Ticket", "Code"].map((h) => (
@@ -161,7 +162,8 @@ export function Runs() {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
 
       <div className="flex items-center justify-end gap-2">
