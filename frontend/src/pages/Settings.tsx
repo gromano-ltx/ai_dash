@@ -363,7 +363,7 @@ export function Settings() {
     <div className="p-6 max-w-2xl space-y-8">
       <h1 className="text-lg font-mono font-semibold text-slate-100">Settings</h1>
 
-      <UsersSection isBootstrap={isBootstrap} isAdmin={isAdmin} />
+      {(isBootstrap || isAdmin) && <UsersSection isBootstrap={isBootstrap} isAdmin={isAdmin} />}
 
       {isAdmin && <ApiKeysSection />}
 
