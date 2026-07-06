@@ -10,13 +10,11 @@ steps:
       - build
       - -t
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app:${_TAG}
-      - -t
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app:latest
       - .
 
   - id: push
     name: gcr.io/cloud-builders/docker
-    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app"]
+    args: [push, "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_SERVICE}/app:${_TAG}"]
 
   - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim

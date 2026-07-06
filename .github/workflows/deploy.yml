@@ -47,7 +47,8 @@ jobs:
         # entirely: cloudbuild.builds.editor (already granted) includes
         # builds.get/.list, no log-bucket access needed at all.
         run: |
-          BUILD_ID=$(gcloud builds submit --config cloudbuild.yaml --async --format="value(id)" .)
+          SHA=$(git rev-parse --short HEAD)
+          BUILD_ID=$(gcloud builds submit --config cloudbuild.yaml --substitutions=_TAG="$SHA" --async --format="value(id)" .)
           echo "Cloud Build ID: $BUILD_ID"
           for i in $(seq 1 120); do
             STATUS=$(gcloud builds describe "$BUILD_ID" --format="value(status)")
