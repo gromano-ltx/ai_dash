@@ -109,24 +109,27 @@ async def auth_middleware(request: Request, call_next):
             # No accounts created yet — fall back to the shared-password
             # Basic Auth gate (today's single-user-deploy behavior),
             # byte-for-byte unchanged.
-            if not _DASHBOARD_PASSWORD:
-                return await call_next(request)
-            auth = request.headers.get("Authorization", "")
-            if auth.startswith("Basic "):
-                try:
-                    _, password = base64.b64decode(auth[6:]).decode().split(":", 1)
-                    if password == _DASHBOARD_PASSWORD:
-                        return await call_next(request)
-                except Exception:
-                    pass
-            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="ai-dash"'})
+            allowed = not _DASHBOARD_PASSWORD
+            if not allowed:
+                auth = request.headers.get("Authorization", "")
+                if auth.startswith("Basic "):
+                    try:
+                        _, password = base64.b64decode(auth[6:]).decode().split(":", 1)
+                        allowed = password == _DASHBOARD_PASSWORD
+                    except Exception:
+                        allowed = False
+        else:
+            # At least one account exists — Basic Auth is retired from here
+            # on; only a valid session cookie gets through.
+            allowed = resolve_session_user(session, request.cookies.get(COOKIE_NAME)) is not None
 
-        # At least one account exists — Basic Auth is retired from here on;
-        # only a valid session cookie gets through.
-        user = resolve_session_user(session, request.cookies.get(COOKIE_NAME))
-
-    if user is not None:
+    # DB session is closed before any of these branches run — none of them
+    # need it, and call_next() can run an arbitrarily long downstream
+    # request, which must not hold this connection open the whole time.
+    if allowed:
         return await call_next(request)
+    if not any_user:
+        return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="ai-dash"'})
     if path.startswith("/api/"):
         return Response(status_code=401, content="Unauthorized")
     return RedirectResponse(url="/login", status_code=302)
