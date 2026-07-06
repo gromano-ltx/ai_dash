@@ -9,13 +9,14 @@ from sse_starlette.sse import EventSourceResponse
 from backend.db import get_session
 from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore
 from backend import sse as sse_bus
-from backend.adapters import claude_code, codex
+from backend.adapters import claude_code, codex, gemini_cli
 from backend.watcher import _upsert
 
 PROVIDERS = ("anthropic", "openai", "gemini")
 PROVIDER_ADAPTERS = {
     "anthropic": claude_code.parse_transcript_content,
     "openai": codex.parse_transcript_content,
+    "gemini": gemini_cli.parse_transcript_content,
 }
 
 
@@ -210,6 +211,7 @@ async def ingest_transcript(
     x_file_offset: int = Header(0),
     x_file_mtime: Optional[float] = Header(None),
     x_provider: str = Header("anthropic"),
+    x_parent_id: Optional[str] = Header(None),
     session: Session = Depends(get_session),
 ):
     api_key = session.get(ApiKey, x_api_key)
@@ -250,7 +252,7 @@ async def ingest_transcript(
         session.commit()
 
     parse_fn = _select_parser(x_provider)
-    run = parse_fn(content, mtime=x_file_mtime)
+    run = parse_fn(content, mtime=x_file_mtime, parent_id=x_parent_id)
     if not run:
         raise HTTPException(status_code=422, detail="Could not parse transcript")
     total_tokens = run.input_tokens + run.output_tokens
