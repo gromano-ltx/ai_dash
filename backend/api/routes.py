@@ -9,10 +9,23 @@ from sse_starlette.sse import EventSourceResponse
 from backend.db import get_session
 from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore
 from backend import sse as sse_bus
-from backend.adapters.claude_code import parse_transcript_content
+from backend.adapters import claude_code, codex
 from backend.watcher import _upsert
 
 PROVIDERS = ("anthropic", "openai", "gemini")
+PROVIDER_ADAPTERS = {
+    "anthropic": claude_code.parse_transcript_content,
+    "openai": codex.parse_transcript_content,
+}
+
+
+def _select_parser(provider: str):
+    parse_fn = PROVIDER_ADAPTERS.get(provider)
+    if parse_fn is None:
+        raise HTTPException(status_code=422, detail=f"Unknown provider: {provider!r}")
+    return parse_fn
+
+
 MAX_COMPRESSED_BYTES = 10 * 1024 * 1024   # 10 MB compressed
 MAX_INGEST_BYTES = 100 * 1024 * 1024      # 100 MB decompressed
 
@@ -196,6 +209,7 @@ async def ingest_transcript(
     x_session_id: Optional[str] = Header(None),
     x_file_offset: int = Header(0),
     x_file_mtime: Optional[float] = Header(None),
+    x_provider: str = Header("anthropic"),
     session: Session = Depends(get_session),
 ):
     api_key = session.get(ApiKey, x_api_key)
@@ -235,7 +249,8 @@ async def ingest_transcript(
         session.add(stored)
         session.commit()
 
-    run = parse_transcript_content(content, mtime=x_file_mtime)
+    parse_fn = _select_parser(x_provider)
+    run = parse_fn(content, mtime=x_file_mtime)
     if not run:
         raise HTTPException(status_code=422, detail="Could not parse transcript")
     total_tokens = run.input_tokens + run.output_tokens

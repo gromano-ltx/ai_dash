@@ -1,32 +1,17 @@
 import json
-import re
-import os
+import time
 import uuid
-import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 from backend.models import AgentRun
-
-TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d+)\b|#(\d+)\b')
-# Common technical abbreviations that match the ticket-key shape
-# ([A-Z]{2,10}-\d+) but are never real ticket prefixes, e.g. "UTF-8",
-# "SHA-256", "ISO-8601" — these show up constantly in commit messages
-# and code discussion and would otherwise render as bogus ticket refs.
-_NON_TICKET_PREFIXES = frozenset({
-    "UTF", "SHA", "HTTP", "HTTPS", "ISO", "RFC", "MD", "CRC", "JSON", "XML",
-    "HTML", "CSS", "URL", "URI", "API", "SQL", "CPU", "GPU", "RAM", "TCP",
-    "UDP", "DNS", "CDN", "JWT", "CORS", "REST", "AES", "RSA", "SSH", "SSL",
-    "TLS", "IPV", "USB", "PDF", "CSV", "YAML", "TOML", "GRPC", "OAUTH",
-    "ASCII", "UUID", "GUID", "IP", "OS", "IO", "ID",
-})
-GIT_COMMIT_RE = re.compile(r'\bgit commit\b')
-GH_PR_RE = re.compile(r'\bgh pr create\b')
-GIT_PUSH_RE = re.compile(r'\bgit push\b')
-GIT_REMOTE_RE = re.compile(r'\bgit remote\b')
-COMMIT_HASH_RE = re.compile(r'\[[\w/._-]+ ([0-9a-f]{7,40})\]')
-PR_URL_RE = re.compile(r'https://github\.com/\S+/pull/\d+')
-GITHUB_REPO_RE = re.compile(r'(?:https://github\.com/|github\.com:)([\w.-]+/[\w.-]+?)(?:\.git)?(?:[/\s]|$)')
+from backend.adapters._common import (
+    _classify_shell_command,
+    _extract_tickets,
+    _get_user,
+    _parse_ts,
+    _resolve_command_output,
+)
 
 
 def parse_transcript_content(
@@ -104,28 +89,11 @@ def parse_transcript_content(
                     if item.get('type') == 'tool_result':
                         tid = item.get('tool_use_id', '')
                         output = _extract_text(item.get('content', ''))
-                        if tid in pending_remote_ids and not github_repo:
-                            m = GITHUB_REPO_RE.search(output)
-                            if m:
-                                github_repo = f"https://github.com/{m.group(1)}"
-                            pending_remote_ids.discard(tid)
-                        if tid in pending_commit_ids:
-                            # findall, not search: a single Bash call can run `git commit`
-                            # more than once (e.g. a loop over several branches), and
-                            # search() would silently keep only the first hash.
-                            git_commits.extend(COMMIT_HASH_RE.findall(output))
-                            pending_commit_ids.discard(tid)
-                        if tid in pending_pr_ids:
-                            # Same reasoning as above: a single Bash call can invoke
-                            # `gh pr create` multiple times (or print several PR URLs,
-                            # e.g. via `gh pr list`), so capture all of them.
-                            pr_urls = PR_URL_RE.findall(output)
-                            git_prs.extend(pr_urls)
-                            if pr_urls and not github_repo:
-                                repo_m = GITHUB_REPO_RE.match(pr_urls[0])
-                                if repo_m:
-                                    github_repo = f"https://github.com/{repo_m.group(1)}"
-                            pending_pr_ids.discard(tid)
+                        github_repo = _resolve_command_output(
+                            tid, output,
+                            pending_commit_ids, pending_pr_ids, pending_remote_ids,
+                            git_commits, git_prs, github_repo,
+                        )
                     elif item.get('type') == 'text' and not first_user_text:
                         text = item.get('text', '').strip()
                         if text and not text.startswith('<'):
@@ -156,12 +124,10 @@ def parse_transcript_content(
                     if item.get('name') == 'Bash':
                         cmd = item.get('input', {}).get('command', '')
                         tid = item.get('id', '')
-                        if GIT_COMMIT_RE.search(cmd) and tid:
-                            pending_commit_ids.add(tid)
-                        if GH_PR_RE.search(cmd) and tid:
-                            pending_pr_ids.add(tid)
-                        if (GIT_PUSH_RE.search(cmd) or GIT_REMOTE_RE.search(cmd)) and tid:
-                            pending_remote_ids.add(tid)
+                        _classify_shell_command(
+                            cmd, tid,
+                            pending_commit_ids, pending_pr_ids, pending_remote_ids,
+                        )
                         bash_commands.append(cmd)
 
     # isMeta/ai-title events are rare; most transcript lines carry sessionId regardless
@@ -173,7 +139,10 @@ def parse_transcript_content(
     run_id = (f"agent-{agent_id}" if agent_id else None) or session_id or str(uuid.uuid4())
 
     if mtime is not None:
-        status = "running" if (datetime.utcnow().timestamp() - mtime) < 300 else "done"
+        # time.time() (not datetime.utcnow().timestamp()) — utcnow() is naive and
+        # .timestamp() reinterprets naive datetimes as local time, which skews this
+        # comparison by the host's UTC offset on any non-UTC machine.
+        status = "running" if (time.time() - mtime) < 300 else "done"
     else:
         status = "done"
 
@@ -202,13 +171,6 @@ def parse_transcript_content(
     )
 
 
-def _parse_ts(ts_str: str) -> datetime:
-    try:
-        return datetime.fromisoformat(ts_str.replace('Z', '+00:00')).replace(tzinfo=None)
-    except Exception:
-        return datetime.utcnow()
-
-
 def _extract_text(content) -> str:
     if isinstance(content, str):
         return content.strip()
@@ -219,34 +181,6 @@ def _extract_text(content) -> str:
                 parts.append(c.get('text', ''))
         return ' '.join(parts).strip()
     return ''
-
-
-def _extract_tickets(text: str) -> list[str]:
-    refs = []
-    for m in TICKET_RE.finditer(text):
-        if m.group(1):
-            if m.group(1).split('-')[0] in _NON_TICKET_PREFIXES:
-                continue
-            ref = m.group(1)
-        else:
-            ref = f"#{m.group(2)}"
-        if ref not in refs:
-            refs.append(ref)
-    return refs
-
-
-def _get_user() -> str:
-    try:
-        result = subprocess.run(
-            ['git', 'config', 'user.name'],
-            capture_output=True, text=True, timeout=2
-        )
-        name = result.stdout.strip()
-        if name:
-            return name
-    except Exception:
-        pass
-    return os.environ.get('USER', 'unknown')
 
 
 def parse_transcript(path: Path) -> Optional[AgentRun]:
