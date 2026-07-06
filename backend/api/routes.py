@@ -20,7 +20,10 @@ PROVIDER_ADAPTERS = {
 
 
 def _select_parser(provider: str):
-    return PROVIDER_ADAPTERS.get(provider, claude_code.parse_transcript_content)
+    parse_fn = PROVIDER_ADAPTERS.get(provider)
+    if parse_fn is None:
+        raise HTTPException(status_code=422, detail=f"Unknown provider: {provider!r}")
+    return parse_fn
 
 
 MAX_COMPRESSED_BYTES = 10 * 1024 * 1024   # 10 MB compressed
