@@ -1,8 +1,13 @@
+import asyncio
+import json
+
 import pytest
 from sqlmodel import Session
 
 import backend.api.auth_routes as auth_routes_module
 import backend.db as db_module
+from backend import sse as sse_bus
+from backend.api.routes import stream_runs
 from backend.auth import hash_password
 from backend.models import AgentRun, User
 
@@ -86,3 +91,41 @@ def test_admin_can_manage_api_keys(test_client):
         _seed_users_and_runs(session)
     _login(test_client, "bob", "y")
     assert test_client.get("/api/keys").status_code == 200
+
+
+def test_stream_filters_run_updated_events_by_user(test_client):
+    """A non-admin subscriber's /api/stream generator must skip another
+    user's run_updated event, while an admin subscriber sees everything.
+
+    Drives the real `stream_runs` generator (not a mock): subscribes two
+    queues via the actual endpoint function, broadcasts through the real
+    `backend.sse.broadcast`, and reads the generator's actual output.
+    """
+    alice = User(username="alice", password_hash="x", is_admin=False)
+    bob = User(username="bob", password_hash="y", is_admin=True)
+
+    async def scenario():
+        alice_response = await stream_runs(current_user=alice)
+        bob_response = await stream_runs(current_user=bob)
+        alice_gen = alice_response.body_iterator
+        bob_gen = bob_response.body_iterator
+        try:
+            # Broadcast an event belonging to bob, then a sentinel event
+            # belonging to alice. If alice's generator forwarded bob's
+            # event, it would surface first; since it must be skipped
+            # (via `continue`), the sentinel is what she actually receives.
+            await sse_bus.broadcast({"type": "run_updated", "id": "run-bob", "user": "bob"})
+            await sse_bus.broadcast({"type": "run_updated", "id": "run-alice-sentinel", "user": "alice"})
+
+            alice_first = json.loads((await alice_gen.__anext__())["data"])
+            assert alice_first["id"] == "run-alice-sentinel"
+
+            # Admin sees the un-filtered stream, including bob's own event
+            # as the first item.
+            bob_first = json.loads((await bob_gen.__anext__())["data"])
+            assert bob_first["id"] == "run-bob"
+        finally:
+            await alice_gen.aclose()
+            await bob_gen.aclose()
+
+    asyncio.run(scenario())

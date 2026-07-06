@@ -283,12 +283,14 @@ async def ingest_transcript(
     run.user = api_key.user
     run_id, run_status = run.id, run.status
     _upsert(run)
-    await sse_bus.broadcast({"type": "run_updated", "id": run_id})
+    await sse_bus.broadcast({"type": "run_updated", "id": run_id, "user": run.user})
     return {"id": run_id, "status": run_status}
 
 
 @router.get("/stream")
-async def stream_runs():
+async def stream_runs(
+    current_user: Optional[User] = Depends(get_optional_user),
+):
     q = sse_bus.subscribe()
 
     async def generator():
@@ -296,6 +298,13 @@ async def stream_runs():
             while True:
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=30)
+                    if (
+                        current_user
+                        and not current_user.is_admin
+                        and event.get("type") == "run_updated"
+                        and event.get("user") != current_user.username
+                    ):
+                        continue
                     yield {"data": json.dumps(event)}
                 except asyncio.TimeoutError:
                     yield {"data": json.dumps({"type": "ping"})}
