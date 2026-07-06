@@ -5,6 +5,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Runs } from "./pages/Runs";
 import { RunDetail } from "./pages/RunDetail";
 import { Settings } from "./pages/Settings";
+import { Login } from "./pages/Login";
 import { useRunsStream } from "./lib/sse";
 import { UserProvider } from "./lib/UserContext";
 
@@ -15,6 +16,7 @@ function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/login" element={<Login />} />
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/runs" element={<Runs />} />
