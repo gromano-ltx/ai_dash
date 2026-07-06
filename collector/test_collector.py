@@ -206,3 +206,50 @@ def test_sync_all_dispatches_correct_provider_per_source(tmp_path, monkeypatch):
 
     assert ("session1.jsonl", "anthropic") in calls
     assert ("session2.jsonl", "openai") in calls
+
+
+def test_watch_rechecks_sources_after_periodic_timeout(tmp_path, monkeypatch):
+    # A source directory that doesn't exist yet when watch() starts (e.g.
+    # ~/.codex/sessions before the user has ever run Codex CLI) must still
+    # get picked up once it appears, without requiring a process restart.
+    monkeypatch.setattr(collector_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(collector_mod, "STATE_FILE", tmp_path / "state.json")
+
+    anthropic_dir = tmp_path / "claude"
+    anthropic_dir.mkdir()
+    openai_dir = tmp_path / "codex"  # does not exist on the first watch cycle
+
+    monkeypatch.setattr(collector_mod, "SOURCES", {"anthropic": anthropic_dir, "openai": openai_dir})
+
+    watched_calls = []
+    call_count = 0
+
+    async def fake_awatch(*paths):
+        nonlocal call_count
+        call_count += 1
+        watched_calls.append(set(paths))
+        if call_count == 1:
+            # Simulate the "openai" source appearing while the first watch
+            # cycle was in progress, then the periodic recheck timeout firing.
+            openai_dir.mkdir()
+            raise TimeoutError()
+        raise RuntimeError("stop-test-here")
+        yield set()  # pragma: no cover — makes this an async generator function
+
+    monkeypatch.setattr(watchfiles, "awatch", fake_awatch)
+
+    fallback_calls = []
+    monkeypatch.setattr(
+        collector_mod,
+        "_watch_poll",
+        lambda url, key: fallback_calls.append((url, key)),
+    )
+
+    asyncio.run(collector_mod.watch("https://example.test", "test-key"))
+
+    assert len(watched_calls) == 2
+    assert watched_calls[0] == {str(anthropic_dir)}
+    assert watched_calls[1] == {str(anthropic_dir), str(openai_dir)}
+    # The RuntimeError on the second cycle should still hit the existing
+    # fallback-to-polling path, confirming that path still works after this change.
+    assert fallback_calls == [("https://example.test", "test-key")]

@@ -331,6 +331,12 @@ async def sync_all(url: str, key: str, state: dict, client) -> dict:
     return state
 
 
+_SOURCE_RECHECK_INTERVAL = 60  # seconds — how often to re-scan SOURCES for a
+# directory that didn't exist when watch() started (e.g. ~/.codex/sessions
+# before the user has ever run Codex CLI), so it gets picked up without
+# requiring a manual restart of the collector process.
+
+
 async def watch(url: str, key: str):
     import httpx
     from watchfiles import awatch
@@ -341,32 +347,39 @@ async def watch(url: str, key: str):
         state = await sync_all(url, key, state, client)
         save_state(state)
 
-        existing_sources = [base for base in SOURCES.values() if base.exists()]
-        if not existing_sources:
-            logger.warning(f"none of {list(SOURCES.values())} found, will watch once one appears")
-            return
+        while True:
+            existing_sources = [base for base in SOURCES.values() if base.exists()]
+            if not existing_sources:
+                logger.warning(f"none of {list(SOURCES.values())} found, waiting for one to appear")
+                await asyncio.sleep(_SOURCE_RECHECK_INTERVAL)
+                continue
 
-        logger.info(f"watching {existing_sources}")
-        try:
-            async for changes in awatch(*[str(b) for b in existing_sources]):
-                changed = {Path(p) for _, p in changes if p.endswith(".jsonl")}
-                for path in changed:
-                    try:
-                        stat = path.stat()
-                        mtime, size = stat.st_mtime, stat.st_size
-                    except Exception:
-                        continue
-                    key_str = str(path)
-                    entry = state.get(key_str, {"mtime": 0, "offset": 0})
-                    offset = entry["offset"] if size >= entry["offset"] else 0
-                    provider = _provider_for_path(path)
-                    ok, new_offset, _ = await ship(path, url, key, provider, client, offset, mtime)
-                    if ok:
-                        state[key_str] = {"mtime": mtime, "offset": new_offset}
-                        save_state(state)
-        except Exception as exc:
-            logger.error(f"watchfiles failed at runtime ({exc}), falling back to stdlib polling")
-            _watch_poll(url, key)
+            logger.info(f"watching {existing_sources}")
+            try:
+                async with asyncio.timeout(_SOURCE_RECHECK_INTERVAL):
+                    async for changes in awatch(*[str(b) for b in existing_sources]):
+                        changed = {Path(p) for _, p in changes if p.endswith(".jsonl")}
+                        for path in changed:
+                            try:
+                                stat = path.stat()
+                                mtime, size = stat.st_mtime, stat.st_size
+                            except Exception:
+                                continue
+                            key_str = str(path)
+                            entry = state.get(key_str, {"mtime": 0, "offset": 0})
+                            offset = entry["offset"] if size >= entry["offset"] else 0
+                            provider = _provider_for_path(path)
+                            ok, new_offset, _ = await ship(path, url, key, provider, client, offset, mtime)
+                            if ok:
+                                state[key_str] = {"mtime": mtime, "offset": new_offset}
+                                save_state(state)
+            except TimeoutError:
+                # Periodic restart — re-evaluate SOURCES in case a new one appeared.
+                continue
+            except Exception as exc:
+                logger.error(f"watchfiles failed at runtime ({exc}), falling back to stdlib polling")
+                _watch_poll(url, key)
+                return
 
 
 def main():
