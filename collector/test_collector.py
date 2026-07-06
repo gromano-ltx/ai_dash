@@ -253,3 +253,44 @@ def test_watch_rechecks_sources_after_periodic_timeout(tmp_path, monkeypatch):
     # The RuntimeError on the second cycle should still hit the existing
     # fallback-to-polling path, confirming that path still works after this change.
     assert fallback_calls == [("https://example.test", "test-key")]
+
+
+def test_watch_resyncs_on_periodic_timeout_to_catch_missed_changes(tmp_path, monkeypatch):
+    # awatch()'s live change-detection isn't 100% reliable for every file
+    # (observed in production: a Codex CLI session file kept growing but
+    # awatch() never reported a further change after the first event). The
+    # periodic timeout must also re-run a full sync_all() as a safety net,
+    # not just re-check for newly-appeared source directories.
+    monkeypatch.setattr(collector_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(collector_mod, "STATE_FILE", tmp_path / "state.json")
+
+    anthropic_dir = tmp_path / "claude"
+    anthropic_dir.mkdir()
+    monkeypatch.setattr(collector_mod, "SOURCES", {"anthropic": anthropic_dir})
+
+    sync_all_calls = []
+
+    async def fake_sync_all(url, key, state, client):
+        sync_all_calls.append(1)
+        return state
+
+    monkeypatch.setattr(collector_mod, "sync_all", fake_sync_all)
+
+    call_count = 0
+
+    async def fake_awatch(*paths):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise TimeoutError()
+        raise RuntimeError("stop-test-here")
+        yield set()  # pragma: no cover — makes this an async generator function
+
+    monkeypatch.setattr(watchfiles, "awatch", fake_awatch)
+    monkeypatch.setattr(collector_mod, "_watch_poll", lambda url, key: None)
+
+    asyncio.run(collector_mod.watch("https://example.test", "test-key"))
+
+    # Once at startup (before the watch loop begins), once more after the
+    # periodic timeout fired.
+    assert len(sync_all_calls) == 2

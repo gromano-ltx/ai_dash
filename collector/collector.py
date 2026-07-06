@@ -374,7 +374,14 @@ async def watch(url: str, key: str):
                                 state[key_str] = {"mtime": mtime, "offset": new_offset}
                                 save_state(state)
             except TimeoutError:
-                # Periodic restart — re-evaluate SOURCES in case a new one appeared.
+                # Periodic restart — re-evaluate SOURCES in case a new one
+                # appeared, and re-run a full sync as a safety net: awatch()'s
+                # live change-detection isn't 100% reliable for every file
+                # (observed in production: a growing file stopped generating
+                # further change events after its first one), so this catches
+                # anything the live watch missed within _SOURCE_RECHECK_INTERVAL.
+                state = await sync_all(url, key, state, client)
+                save_state(state)
                 continue
             except Exception as exc:
                 logger.error(f"watchfiles failed at runtime ({exc}), falling back to stdlib polling")
