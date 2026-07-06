@@ -91,6 +91,24 @@ def test_session_mode_serves_built_frontend_static_assets_without_cookie(test_cl
     assert res.status_code == 200
 
 
+def test_fallback_mode_still_requires_basic_auth_for_static_assets(test_client, monkeypatch, tmp_path):
+    # Same fake built-frontend setup as the session-mode static-asset test
+    # above, but with zero User rows and a password set instead of a
+    # seeded user + cookie. Fallback mode's Basic Auth doesn't have the
+    # chicken-and-egg problem session cookies do (the browser re-attaches
+    # cached credentials to every request on the origin), so the
+    # static-asset bypass must NOT apply here.
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "fake.js").write_text("console.log('hi');")
+    (tmp_path / "index.html").write_text("<html></html>")
+    monkeypatch.setattr(main_module, "_FRONTEND", tmp_path)
+    monkeypatch.setattr(main_module, "_FRONTEND_RESOLVED", tmp_path.resolve())
+    monkeypatch.setattr(main_module, "_DASHBOARD_PASSWORD", "secret")
+
+    res = test_client.get("/assets/fake.js", follow_redirects=False)
+    assert res.status_code == 401
+
+
 def test_session_mode_ignores_dashboard_password_once_a_user_exists(test_client, monkeypatch):
     monkeypatch.setattr(main_module, "_DASHBOARD_PASSWORD", "secret")
     with Session(db_module.engine) as session:

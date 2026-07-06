@@ -118,7 +118,7 @@ async def auth_middleware(request: Request, call_next):
     # ingest has its own API key auth; the installer + collector download
     # routes, and the login page/endpoint, must be reachable with no
     # password or session at all.
-    if path.startswith("/api/v1/ingest") or path in _PUBLIC_PATHS or _is_static_frontend_asset(path):
+    if path.startswith("/api/v1/ingest") or path in _PUBLIC_PATHS:
         return await call_next(request)
 
     with next(_get_session()) as session:
@@ -137,6 +137,13 @@ async def auth_middleware(request: Request, call_next):
                         allowed = password == _DASHBOARD_PASSWORD
                     except Exception:
                         allowed = False
+        elif _is_static_frontend_asset(path):
+            # A logged-out browser needs to load its own compiled JS/CSS to even
+            # render /login — Basic Auth doesn't have this chicken-and-egg
+            # problem (the browser re-attaches cached credentials to every
+            # request on the origin), so this only applies once session-cookie
+            # auth (not Basic Auth) is the active mode.
+            allowed = True
         else:
             # At least one account exists — Basic Auth is retired from here
             # on; only a valid session cookie gets through.
