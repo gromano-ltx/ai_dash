@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from backend.db import init_db
 from backend.api.routes import router
 from backend.api.auth_routes import router as auth_router
@@ -85,29 +85,51 @@ app.add_middleware(
 )
 
 
-_PUBLIC_PATHS = frozenset({"/install.sh", "/collector.py"})
+_PUBLIC_PATHS = frozenset({"/install.sh", "/collector.py", "/login", "/api/login"})
 
 
 @app.middleware("http")
-async def basic_auth(request: Request, call_next):
+async def auth_middleware(request: Request, call_next):
+    from sqlmodel import select
+    from backend.auth import COOKIE_NAME, resolve_session_user
+    from backend.db import get_session as _get_session
+    from backend.models import User
+
+    path = request.url.path
     # ingest has its own API key auth; the installer + collector download
-    # routes must be fetchable by a brand-new user who doesn't have the
-    # dashboard password yet — skip basic auth for all three.
-    if (
-        not _DASHBOARD_PASSWORD
-        or request.url.path.startswith("/api/v1/ingest")
-        or request.url.path in _PUBLIC_PATHS
-    ):
+    # routes, and the login page/endpoint, must be reachable with no
+    # password or session at all.
+    if path.startswith("/api/v1/ingest") or path in _PUBLIC_PATHS:
         return await call_next(request)
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Basic "):
-        try:
-            _, password = base64.b64decode(auth[6:]).decode().split(":", 1)
-            if password == _DASHBOARD_PASSWORD:
+
+    with next(_get_session()) as session:
+        any_user = session.exec(select(User.username).limit(1)).first() is not None
+
+        if not any_user:
+            # No accounts created yet — fall back to the shared-password
+            # Basic Auth gate (today's single-user-deploy behavior),
+            # byte-for-byte unchanged.
+            if not _DASHBOARD_PASSWORD:
                 return await call_next(request)
-        except Exception:
-            pass
-    return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="ai-dash"'})
+            auth = request.headers.get("Authorization", "")
+            if auth.startswith("Basic "):
+                try:
+                    _, password = base64.b64decode(auth[6:]).decode().split(":", 1)
+                    if password == _DASHBOARD_PASSWORD:
+                        return await call_next(request)
+                except Exception:
+                    pass
+            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="ai-dash"'})
+
+        # At least one account exists — Basic Auth is retired from here on;
+        # only a valid session cookie gets through.
+        user = resolve_session_user(session, request.cookies.get(COOKIE_NAME))
+
+    if user is not None:
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return Response(status_code=401, content="Unauthorized")
+    return RedirectResponse(url="/login", status_code=302)
 
 
 app.include_router(router, prefix="/api")
