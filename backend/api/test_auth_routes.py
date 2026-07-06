@@ -84,7 +84,8 @@ def test_create_account_after_bootstrap_requires_admin(test_client):
     test_client.post("/api/accounts", json={"username": "gabby", "password": "hunter2"})
     # No session cookie attached — a second creation attempt must be rejected.
     res = test_client.post("/api/accounts", json={"username": "bob", "password": "x"})
-    assert res.status_code == 403
+    # Auth middleware blocks all unauthenticated /api/* requests once any user exists, returning 401 before the route's admin check.
+    assert res.status_code == 401
 
 
 def test_create_account_as_admin_succeeds_and_is_not_admin_by_default(test_client):
