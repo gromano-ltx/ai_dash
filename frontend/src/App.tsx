@@ -7,7 +7,6 @@ import { RunDetail } from "./pages/RunDetail";
 import { Settings } from "./pages/Settings";
 import { Login } from "./pages/Login";
 import { useRunsStream } from "./lib/sse";
-import { UserProvider } from "./lib/UserContext";
 
 const queryClient = new QueryClient();
 
@@ -31,9 +30,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <UserProvider>
-        <AppRoutes />
-      </UserProvider>
+      <AppRoutes />
     </QueryClientProvider>
   );
 }
