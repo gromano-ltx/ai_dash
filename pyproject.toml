@@ -9,6 +9,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "psycopg2-binary>=2.9.9",
     "sse-starlette>=2.1.0",
+    "bcrypt>=5.0.0",
+    "itsdangerous>=2.2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
