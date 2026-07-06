@@ -203,8 +203,6 @@ def _extract_text(content) -> str:
     return ''
 
 
-
-
 def parse_transcript(path: Path) -> Optional[AgentRun]:
     try:
         content = path.read_text(errors='replace')
