@@ -72,6 +72,25 @@ def test_session_mode_allows_api_paths_with_valid_cookie(test_client):
     assert res.status_code == 200
 
 
+def test_session_mode_serves_built_frontend_static_assets_without_cookie(test_client, monkeypatch, tmp_path):
+    # Simulate the production Docker image: a built frontend dir with a
+    # hashed asset under assets/ (as Vite emits) plus an index.html.
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "fake.js").write_text("console.log('hi');")
+    (tmp_path / "index.html").write_text("<html></html>")
+    monkeypatch.setattr(main_module, "_FRONTEND", tmp_path)
+    monkeypatch.setattr(main_module, "_FRONTEND_RESOLVED", tmp_path.resolve())
+
+    with Session(db_module.engine) as session:
+        session.add(User(username="alice", password_hash=hash_password("x")))
+        session.commit()
+
+    # No cookie attached. Before the fix, this would have been a 302
+    # redirect to /login, breaking the login page's own script tag.
+    res = test_client.get("/assets/fake.js", follow_redirects=False)
+    assert res.status_code == 200
+
+
 def test_session_mode_ignores_dashboard_password_once_a_user_exists(test_client, monkeypatch):
     monkeypatch.setattr(main_module, "_DASHBOARD_PASSWORD", "secret")
     with Session(db_module.engine) as session:

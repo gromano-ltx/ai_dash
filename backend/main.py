@@ -13,7 +13,26 @@ from backend import watcher
 
 _ROOT = Path(__file__).parent.parent
 _FRONTEND = _ROOT / "frontend" / "dist"
+# Path.resolve() on a non-existent path doesn't raise, so this is safe to
+# compute unconditionally even when _FRONTEND doesn't exist (local dev).
+_FRONTEND_RESOLVED = _FRONTEND.resolve()
 _DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+
+
+def _is_static_frontend_asset(path: str) -> bool:
+    """Whether `path` resolves to a real file inside the built frontend dir.
+
+    Used to let the browser fetch its own compiled JS/CSS/static assets
+    (e.g. /assets/index-*.js, /favicon.svg) before it has a session cookie —
+    without this, those requests would get redirected to /login instead of
+    served, and the login page's own script tag would never execute.
+    """
+    if not _FRONTEND.exists():
+        return False
+    target = (_FRONTEND / path.lstrip("/")).resolve()
+    if not target.is_relative_to(_FRONTEND_RESOLVED):
+        return False
+    return target.is_file()
 
 
 async def _cleanup_stale_runs():
@@ -99,7 +118,7 @@ async def auth_middleware(request: Request, call_next):
     # ingest has its own API key auth; the installer + collector download
     # routes, and the login page/endpoint, must be reachable with no
     # password or session at all.
-    if path.startswith("/api/v1/ingest") or path in _PUBLIC_PATHS:
+    if path.startswith("/api/v1/ingest") or path in _PUBLIC_PATHS or _is_static_frontend_asset(path):
         return await call_next(request)
 
     with next(_get_session()) as session:
@@ -154,7 +173,6 @@ def serve_install():
 # because those paths don't exist on disk). The catch-all below serves actual asset
 # files directly and falls back to index.html for everything else.
 if _FRONTEND.exists():
-    _FRONTEND_RESOLVED = _FRONTEND.resolve()
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
