@@ -1,10 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRun, Stats, DailyBucket } from "./types";
+import type { AgentRun, Stats, DailyBucket, Me } from "./types";
 
 const BASE = "/api";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("401 Unauthorized");
+  }
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
@@ -75,4 +79,29 @@ export function useStats(user?: string, days?: number) {
     queryFn: () => get(`/stats${qs ? `?${qs}` : ""}`),
     refetchInterval: 10000,
   });
+}
+
+export function useMe() {
+  return useQuery<Me>({
+    queryKey: ["me"],
+    queryFn: () => get("/me"),
+    retry: false,
+  });
+}
+
+export async function login(username: string, password: string): Promise<void> {
+  const res = await fetch(`${BASE}/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail ?? "Invalid username or password");
+  }
+}
+
+export async function logout(): Promise<void> {
+  await fetch(`${BASE}/logout`, { method: "POST" });
+  window.location.href = "/login";
 }
