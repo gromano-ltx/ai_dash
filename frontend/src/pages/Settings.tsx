@@ -125,7 +125,8 @@ export function Settings() {
         )}
 
         <div className="border border-slate-800 rounded overflow-hidden">
-          <table className="w-full text-sm font-mono">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] text-sm font-mono">
             <thead>
               <tr className="border-b border-slate-800 text-xs text-slate-500 uppercase tracking-wider">
                 <th className="px-4 py-2 text-left font-normal">Key Prefix</th>
@@ -158,7 +159,8 @@ export function Settings() {
                 ))
               )}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
       </section>
     </div>
