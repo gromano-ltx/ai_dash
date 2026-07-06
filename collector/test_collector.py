@@ -193,7 +193,7 @@ def test_sync_all_dispatches_correct_provider_per_source(tmp_path, monkeypatch):
 
     calls = []
 
-    async def fake_ship(path, url, key, provider, client, offset=0, mtime=0.0):
+    async def fake_ship(path, url, key, provider, client, offset=0, mtime=0.0, parent_id=None):
         calls.append((path.name, provider))
         return True, len(path.read_text()), 10
 
@@ -294,3 +294,81 @@ def test_watch_resyncs_on_periodic_timeout_to_catch_missed_changes(tmp_path, mon
     # Once at startup (before the watch loop begins), once more after the
     # periodic timeout fired.
     assert len(sync_all_calls) == 2
+
+
+def test_parent_id_for_path_detects_gemini_subagent_path(tmp_path):
+    path = tmp_path / "chats" / "06ba9b64-parent" / "9c128235-subagent.jsonl"
+    assert collector_mod._parent_id_for_path(path, "gemini") == "06ba9b64-parent"
+
+
+def test_parent_id_for_path_returns_none_for_gemini_main_session(tmp_path):
+    path = tmp_path / "chats" / "session-2026-06-29T13-49-06ba9b64.jsonl"
+    assert collector_mod._parent_id_for_path(path, "gemini") is None
+
+
+def test_parent_id_for_path_returns_none_for_non_gemini_provider(tmp_path):
+    # Same subagent-shaped nesting, but this convention only applies to the
+    # "gemini" source — Claude Code/Codex paths never mean this.
+    path = tmp_path / "chats" / "06ba9b64-parent" / "9c128235-subagent.jsonl"
+    assert collector_mod._parent_id_for_path(path, "openai") is None
+
+
+def test_ship_urllib_sends_x_parent_id_header_when_present(tmp_path, monkeypatch):
+    f = tmp_path / "session.jsonl"
+    f.write_text("hello world")
+
+    captured = {}
+
+    class FakeResponse:
+        def read(self):
+            return json.dumps({"id": "abc", "status": "done"}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, context=None, timeout=None):
+        captured["parent_id"] = req.get_header("X-parent-id")
+        return FakeResponse()
+
+    monkeypatch.setattr(collector_mod.urllib.request, "urlopen", fake_urlopen)
+
+    ok, new_offset, _ = collector_mod._ship_urllib(
+        f, "https://example.test", "test-key", "gemini",
+        offset=0, mtime=1.0, parent_id="parent-session-xyz",
+    )
+
+    assert ok
+    assert captured["parent_id"] == "parent-session-xyz"
+
+
+def test_ship_urllib_omits_x_parent_id_header_when_none(tmp_path, monkeypatch):
+    f = tmp_path / "session.jsonl"
+    f.write_text("hello world")
+
+    captured = {}
+
+    class FakeResponse:
+        def read(self):
+            return json.dumps({"id": "abc", "status": "done"}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, context=None, timeout=None):
+        captured["parent_id"] = req.get_header("X-parent-id")
+        return FakeResponse()
+
+    monkeypatch.setattr(collector_mod.urllib.request, "urlopen", fake_urlopen)
+
+    ok, new_offset, _ = collector_mod._ship_urllib(
+        f, "https://example.test", "test-key", "anthropic", offset=0, mtime=1.0,
+    )
+
+    assert ok
+    assert captured["parent_id"] is None

@@ -31,6 +31,7 @@ STATE_FILE = CONFIG_DIR / "state.json"
 SOURCES = {
     "anthropic": Path.home() / ".claude" / "projects",
     "openai": Path.home() / ".codex" / "sessions",
+    "gemini": Path.home() / ".gemini" / "tmp",
 }
 
 
@@ -42,6 +43,22 @@ def _provider_for_path(path: Path) -> str:
         except ValueError:
             continue
     return "anthropic"
+
+
+def _parent_id_for_path(path: Path, provider: str) -> str | None:
+    """Gemini CLI subagent transcripts live at .../chats/<parent-id>/<subagent-id>.jsonl —
+    two directories under "chats" — vs. main sessions directly at
+    .../chats/session-*.jsonl, one directory under "chats". The subagent's own
+    transcript content never records its parent's session id anywhere (unlike
+    Claude Code's agentId/sessionId fields), so this must be derived from the
+    path here, before the file is shipped — the backend never receives the
+    original file path.
+    """
+    if provider != "gemini":
+        return None
+    if path.parent.name != "chats" and path.parent.parent.name == "chats":
+        return path.parent.name
+    return None
 
 
 LOG_FILE = CONFIG_DIR / "collector.log"
@@ -131,7 +148,8 @@ def save_state(state: dict):
 # ── stdlib path (polling + urllib) ───────────────────────────────────────────
 
 def _ship_urllib(
-    path: Path, url: str, key: str, provider: str, offset: int = 0, mtime: float = 0.0
+    path: Path, url: str, key: str, provider: str, offset: int = 0, mtime: float = 0.0,
+    parent_id: str | None = None,
 ) -> tuple[bool, int, int]:
     """Returns (ok, new_offset, compressed_bytes_sent)."""
     try:
@@ -157,6 +175,8 @@ def _ship_urllib(
     req.add_header("X-File-Offset", str(offset))
     req.add_header("X-File-Mtime", str(mtime))
     req.add_header("X-Provider", provider)
+    if parent_id:
+        req.add_header("X-Parent-Id", parent_id)
 
     try:
         ctx = ssl.create_default_context()
@@ -172,7 +192,7 @@ def _ship_urllib(
         text = exc.read().decode("utf-8", errors="replace")
         if exc.code == 400 and "Resend from offset 0" in text:
             logger.info(f"server lost session for {path.name}, re-sending from offset 0")
-            return _ship_urllib(path, url, key, provider, offset=0, mtime=mtime)
+            return _ship_urllib(path, url, key, provider, offset=0, mtime=mtime, parent_id=parent_id)
         logger.error(f"server error {exc.code} for {path.name}")
         return False, offset, 0
     except Exception as exc:
@@ -198,10 +218,13 @@ def _sync_all_stdlib(url: str, key: str, state: dict) -> dict:
                 continue
 
             offset = entry["offset"] if size >= entry["offset"] else 0
+            parent_id = _parent_id_for_path(path, provider)
 
             # Three attempts with backoff for transient network errors
             for attempt in range(3):
-                ok, new_offset, gz_len = _ship_urllib(path, url, key, provider, offset, mtime)
+                ok, new_offset, gz_len = _ship_urllib(
+                    path, url, key, provider, offset, mtime, parent_id=parent_id
+                )
                 if ok:
                     total_raw += new_offset - offset
                     total_gz += gz_len
@@ -243,7 +266,8 @@ def _watch_poll(url: str, key: str, interval: int = 10):
 # ── async path (httpx + watchfiles) ─────────────────────────────────────────
 
 async def ship(
-    path: Path, url: str, key: str, provider: str, client, offset: int = 0, mtime: float = 0.0
+    path: Path, url: str, key: str, provider: str, client, offset: int = 0, mtime: float = 0.0,
+    parent_id: str | None = None,
 ) -> tuple[bool, int, int]:
     """Returns (ok, new_offset, compressed_bytes_sent)."""
     try:
@@ -265,18 +289,21 @@ async def ship(
     # no immediate retry.
     for attempt in range(3):
         try:
+            headers = {
+                "X-API-Key": key,
+                "Content-Type": "text/plain",
+                "Content-Encoding": "gzip",
+                "X-Session-Id": path.stem,
+                "X-File-Offset": str(offset),
+                "X-File-Mtime": str(mtime),
+                "X-Provider": provider,
+            }
+            if parent_id:
+                headers["X-Parent-Id"] = parent_id
             resp = await client.post(
                 f"{url.rstrip('/')}/api/v1/ingest",
                 content=compressed,
-                headers={
-                    "X-API-Key": key,
-                    "Content-Type": "text/plain",
-                    "Content-Encoding": "gzip",
-                    "X-Session-Id": path.stem,
-                    "X-File-Offset": str(offset),
-                    "X-File-Mtime": str(mtime),
-                    "X-Provider": provider,
-                },
+                headers=headers,
                 timeout=15,
             )
             if resp.status_code == 200:
@@ -289,7 +316,7 @@ async def ship(
                 return True, new_offset, len(compressed)
             elif resp.status_code == 400 and "Resend from offset 0" in resp.text:
                 logger.info(f"server lost session for {path.name}, re-sending from offset 0")
-                return await ship(path, url, key, provider, client, offset=0, mtime=mtime)
+                return await ship(path, url, key, provider, client, offset=0, mtime=mtime, parent_id=parent_id)
             else:
                 logger.error(f"server error {resp.status_code} for {path.name}")
         except Exception as exc:
@@ -319,7 +346,10 @@ async def sync_all(url: str, key: str, state: dict, client) -> dict:
                 continue
 
             offset = entry["offset"] if size >= entry["offset"] else 0
-            ok, new_offset, gz_len = await ship(path, url, key, provider, client, offset, mtime)
+            parent_id = _parent_id_for_path(path, provider)
+            ok, new_offset, gz_len = await ship(
+                path, url, key, provider, client, offset, mtime, parent_id=parent_id
+            )
             if ok:
                 total_raw += new_offset - offset
                 total_gz += gz_len
@@ -369,7 +399,10 @@ async def watch(url: str, key: str):
                             entry = state.get(key_str, {"mtime": 0, "offset": 0})
                             offset = entry["offset"] if size >= entry["offset"] else 0
                             provider = _provider_for_path(path)
-                            ok, new_offset, _ = await ship(path, url, key, provider, client, offset, mtime)
+                            parent_id = _parent_id_for_path(path, provider)
+                            ok, new_offset, _ = await ship(
+                                path, url, key, provider, client, offset, mtime, parent_id=parent_id
+                            )
                             if ok:
                                 state[key_str] = {"mtime": mtime, "offset": new_offset}
                                 save_state(state)
