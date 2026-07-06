@@ -96,7 +96,7 @@ def parse_transcript_content(
             elif ptype == 'function_call' and payload.get('name') == 'shell':
                 call_id = payload.get('call_id', '')
                 try:
-                    args = json.loads(payload.get('arguments', '{}'))
+                    args = json.loads(payload.get('arguments') or '{}')
                 except json.JSONDecodeError:
                     args = {}
                 cmd_list = args.get('command', [])
@@ -138,7 +138,7 @@ def parse_transcript_content(
         elif etype == 'event_msg' and payload.get('type') == 'token_count':
             info = payload.get('info')
             if info:
-                usage = info.get('total_token_usage', {})
+                usage = info.get('total_token_usage') or {}
                 input_tokens = usage.get('input_tokens', input_tokens)
                 output_tokens = usage.get('output_tokens', output_tokens)
 

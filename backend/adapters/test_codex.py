@@ -196,3 +196,47 @@ def test_parse_transcript_content_status_running_when_mtime_is_recent():
     run = parse_transcript_content(_sample_session(), mtime=time.time())
     assert run.status == "running"
     assert run.ended_at is None
+
+
+def test_parse_transcript_content_handles_null_arguments():
+    # A function_call event with "arguments": null (key present, value null) —
+    # distinct from a missing key, which the '{}' default already handles.
+    line = _line({
+        "timestamp": "2026-04-16T16:02:00.000Z",
+        "type": "response_item",
+        "payload": {
+            "type": "function_call",
+            "name": "shell",
+            "arguments": None,
+            "call_id": "call_null_args",
+        },
+    })
+    content = _sample_session().rstrip("\n") + "\n" + line + "\n"
+    run = parse_transcript_content(content)
+    assert run is not None
+
+
+def test_parse_transcript_content_handles_null_total_token_usage():
+    # A token_count event with info.total_token_usage: null (key present,
+    # value null) — distinct from a missing key, which the {} default
+    # already handles. Token counts should stay at whatever they were before.
+    line = _line({
+        "timestamp": "2026-04-16T16:02:25.000Z",
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": {
+                "total_token_usage": None,
+                "last_token_usage": {},
+                "model_context_window": 272000,
+            },
+            "rate_limits": {"primary": None, "secondary": None},
+        },
+    })
+    content = _sample_session().rstrip("\n") + "\n" + line + "\n"
+    run = parse_transcript_content(content)
+    assert run is not None
+    # Preserves the last valid (non-null) token counts rather than crashing
+    # or silently resetting to 0.
+    assert run.input_tokens == 3010
+    assert run.output_tokens == 128
