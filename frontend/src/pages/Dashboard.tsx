@@ -106,7 +106,7 @@ export function Dashboard() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-y-2">
         <div>
           <h1 className="text-lg font-mono font-semibold text-slate-100">Overview</h1>
           <p className="text-sm text-slate-500 mt-0.5">Last {days === 1 ? "24 hours" : `${days} days`}</p>
