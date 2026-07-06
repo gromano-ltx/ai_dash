@@ -1,20 +1,16 @@
 import json
+import time
 import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 from backend.models import AgentRun
 from backend.adapters._common import (
-    GIT_COMMIT_RE,
-    GH_PR_RE,
-    GIT_PUSH_RE,
-    GIT_REMOTE_RE,
-    COMMIT_HASH_RE,
-    PR_URL_RE,
-    GITHUB_REPO_RE,
+    _classify_shell_command,
     _extract_tickets,
-    _parse_ts,
     _get_user,
+    _parse_ts,
+    _resolve_command_output,
 )
 
 
@@ -93,28 +89,11 @@ def parse_transcript_content(
                     if item.get('type') == 'tool_result':
                         tid = item.get('tool_use_id', '')
                         output = _extract_text(item.get('content', ''))
-                        if tid in pending_remote_ids and not github_repo:
-                            m = GITHUB_REPO_RE.search(output)
-                            if m:
-                                github_repo = f"https://github.com/{m.group(1)}"
-                            pending_remote_ids.discard(tid)
-                        if tid in pending_commit_ids:
-                            # findall, not search: a single Bash call can run `git commit`
-                            # more than once (e.g. a loop over several branches), and
-                            # search() would silently keep only the first hash.
-                            git_commits.extend(COMMIT_HASH_RE.findall(output))
-                            pending_commit_ids.discard(tid)
-                        if tid in pending_pr_ids:
-                            # Same reasoning as above: a single Bash call can invoke
-                            # `gh pr create` multiple times (or print several PR URLs,
-                            # e.g. via `gh pr list`), so capture all of them.
-                            pr_urls = PR_URL_RE.findall(output)
-                            git_prs.extend(pr_urls)
-                            if pr_urls and not github_repo:
-                                repo_m = GITHUB_REPO_RE.match(pr_urls[0])
-                                if repo_m:
-                                    github_repo = f"https://github.com/{repo_m.group(1)}"
-                            pending_pr_ids.discard(tid)
+                        github_repo = _resolve_command_output(
+                            tid, output,
+                            pending_commit_ids, pending_pr_ids, pending_remote_ids,
+                            git_commits, git_prs, github_repo,
+                        )
                     elif item.get('type') == 'text' and not first_user_text:
                         text = item.get('text', '').strip()
                         if text and not text.startswith('<'):
@@ -145,12 +124,10 @@ def parse_transcript_content(
                     if item.get('name') == 'Bash':
                         cmd = item.get('input', {}).get('command', '')
                         tid = item.get('id', '')
-                        if GIT_COMMIT_RE.search(cmd) and tid:
-                            pending_commit_ids.add(tid)
-                        if GH_PR_RE.search(cmd) and tid:
-                            pending_pr_ids.add(tid)
-                        if (GIT_PUSH_RE.search(cmd) or GIT_REMOTE_RE.search(cmd)) and tid:
-                            pending_remote_ids.add(tid)
+                        _classify_shell_command(
+                            cmd, tid,
+                            pending_commit_ids, pending_pr_ids, pending_remote_ids,
+                        )
                         bash_commands.append(cmd)
 
     # isMeta/ai-title events are rare; most transcript lines carry sessionId regardless
@@ -162,7 +139,10 @@ def parse_transcript_content(
     run_id = (f"agent-{agent_id}" if agent_id else None) or session_id or str(uuid.uuid4())
 
     if mtime is not None:
-        status = "running" if (datetime.utcnow().timestamp() - mtime) < 300 else "done"
+        # time.time() (not datetime.utcnow().timestamp()) — utcnow() is naive and
+        # .timestamp() reinterprets naive datetimes as local time, which skews this
+        # comparison by the host's UTC offset on any non-UTC machine.
+        status = "running" if (time.time() - mtime) < 300 else "done"
     else:
         status = "done"
 

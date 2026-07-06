@@ -3,9 +3,11 @@ from datetime import datetime
 from backend.adapters._common import (
     COMMIT_HASH_RE,
     PR_URL_RE,
+    _classify_shell_command,
     _extract_tickets,
     _get_user,
     _parse_ts,
+    _resolve_command_output,
 )
 
 
@@ -48,3 +50,87 @@ def test_pr_url_re_matches_github_pull_url():
 def test_get_user_returns_a_non_empty_string():
     assert isinstance(_get_user(), str)
     assert _get_user()
+
+
+def test_classify_shell_command_marks_commit_pending():
+    pending_commit_ids, pending_pr_ids, pending_remote_ids = set(), set(), set()
+    _classify_shell_command(
+        "git commit -am 'fix bug'", "call1",
+        pending_commit_ids, pending_pr_ids, pending_remote_ids,
+    )
+    assert pending_commit_ids == {"call1"}
+    assert pending_pr_ids == set()
+    assert pending_remote_ids == set()
+
+
+def test_classify_shell_command_marks_pr_pending():
+    pending_commit_ids, pending_pr_ids, pending_remote_ids = set(), set(), set()
+    _classify_shell_command(
+        "gh pr create --title x", "call2",
+        pending_commit_ids, pending_pr_ids, pending_remote_ids,
+    )
+    assert pending_pr_ids == {"call2"}
+
+
+def test_classify_shell_command_marks_remote_pending_for_push_or_remote():
+    pending_commit_ids, pending_pr_ids, pending_remote_ids = set(), set(), set()
+    _classify_shell_command(
+        "git push origin main", "call3",
+        pending_commit_ids, pending_pr_ids, pending_remote_ids,
+    )
+    assert pending_remote_ids == {"call3"}
+
+
+def test_classify_shell_command_ignores_unrelated_command():
+    pending_commit_ids, pending_pr_ids, pending_remote_ids = set(), set(), set()
+    _classify_shell_command(
+        "ls -la", "call4",
+        pending_commit_ids, pending_pr_ids, pending_remote_ids,
+    )
+    assert not pending_commit_ids and not pending_pr_ids and not pending_remote_ids
+
+
+def test_classify_shell_command_noop_without_call_id():
+    pending_commit_ids, pending_pr_ids, pending_remote_ids = set(), set(), set()
+    _classify_shell_command(
+        "git commit -am x", "",
+        pending_commit_ids, pending_pr_ids, pending_remote_ids,
+    )
+    assert pending_commit_ids == set()
+
+
+def test_resolve_command_output_extracts_commit_hash():
+    git_commits, git_prs = [], []
+    pending_commit_ids = {"call1"}
+    github_repo = _resolve_command_output(
+        "call1", "[main abc1234] fix bug\n",
+        pending_commit_ids, set(), set(),
+        git_commits, git_prs, None,
+    )
+    assert git_commits == ["abc1234"]
+    assert github_repo is None
+    assert pending_commit_ids == set()
+
+
+def test_resolve_command_output_extracts_pr_url_and_repo():
+    git_commits, git_prs = [], []
+    pending_pr_ids = {"call2"}
+    github_repo = _resolve_command_output(
+        "call2", "https://github.com/gromano-ltx/ai_dash/pull/32\n",
+        set(), pending_pr_ids, set(),
+        git_commits, git_prs, None,
+    )
+    assert git_prs == ["https://github.com/gromano-ltx/ai_dash/pull/32"]
+    assert github_repo == "https://github.com/gromano-ltx/ai_dash"
+    assert pending_pr_ids == set()
+
+
+def test_resolve_command_output_ignores_unrelated_call_id():
+    git_commits, git_prs = [], []
+    github_repo = _resolve_command_output(
+        "unrelated_call", "[main abc1234] fix bug\n",
+        {"call1"}, set(), set(),
+        git_commits, git_prs, None,
+    )
+    assert git_commits == []
+    assert github_repo is None

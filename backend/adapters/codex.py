@@ -6,16 +6,11 @@ from typing import Optional
 
 from backend.models import AgentRun
 from backend.adapters._common import (
-    GIT_COMMIT_RE,
-    GH_PR_RE,
-    GIT_PUSH_RE,
-    GIT_REMOTE_RE,
-    COMMIT_HASH_RE,
-    PR_URL_RE,
-    GITHUB_REPO_RE,
+    _classify_shell_command,
     _extract_tickets,
-    _parse_ts,
     _get_user,
+    _parse_ts,
+    _resolve_command_output,
 )
 
 DEFAULT_MODEL = "gpt-5-codex"
@@ -103,12 +98,10 @@ def parse_transcript_content(
                 cmd = ' '.join(cmd_list) if isinstance(cmd_list, list) else str(cmd_list)
                 if cmd:
                     bash_commands.append(cmd)
-                    if GIT_COMMIT_RE.search(cmd) and call_id:
-                        pending_commit_ids.add(call_id)
-                    if GH_PR_RE.search(cmd) and call_id:
-                        pending_pr_ids.add(call_id)
-                    if (GIT_PUSH_RE.search(cmd) or GIT_REMOTE_RE.search(cmd)) and call_id:
-                        pending_remote_ids.add(call_id)
+                    _classify_shell_command(
+                        cmd, call_id,
+                        pending_commit_ids, pending_pr_ids, pending_remote_ids,
+                    )
 
             elif ptype == 'function_call_output':
                 call_id = payload.get('call_id', '')
@@ -118,22 +111,11 @@ def parse_transcript_content(
                 except (json.JSONDecodeError, AttributeError):
                     output = raw_output if isinstance(raw_output, str) else ''
 
-                if call_id in pending_remote_ids and not github_repo:
-                    m = GITHUB_REPO_RE.search(output)
-                    if m:
-                        github_repo = f"https://github.com/{m.group(1)}"
-                    pending_remote_ids.discard(call_id)
-                if call_id in pending_commit_ids:
-                    git_commits.extend(COMMIT_HASH_RE.findall(output))
-                    pending_commit_ids.discard(call_id)
-                if call_id in pending_pr_ids:
-                    pr_urls = PR_URL_RE.findall(output)
-                    git_prs.extend(pr_urls)
-                    if pr_urls and not github_repo:
-                        repo_m = GITHUB_REPO_RE.match(pr_urls[0])
-                        if repo_m:
-                            github_repo = f"https://github.com/{repo_m.group(1)}"
-                    pending_pr_ids.discard(call_id)
+                github_repo = _resolve_command_output(
+                    call_id, output,
+                    pending_commit_ids, pending_pr_ids, pending_remote_ids,
+                    git_commits, git_prs, github_repo,
+                )
 
         elif etype == 'event_msg' and payload.get('type') == 'token_count':
             info = payload.get('info')
