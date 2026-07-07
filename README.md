@@ -27,6 +27,28 @@ The **collector** runs locally, watches your Claude Code transcript files, and s
 
 ---
 
+## Token accounting
+
+`input_tokens` means the same thing for all three providers: the sum of **fresh, non-cached**
+prompt tokens across every turn of a session. Each provider's own coding-agent CLI resends the
+growing conversation as context on every turn, and most of that gets served from a prompt cache
+(a discount, not free) rather than billed at full price — so `input_tokens` deliberately excludes
+the re-sent cached portion, otherwise a long session would look inflated by the same context being
+counted again on every turn.
+
+`meta.cached_input_tokens` captures that excluded, discounted portion separately — not shown on the
+dashboard today, but tracked so future cost-tracking work can price fresh vs. cached tokens
+correctly without re-parsing transcripts again.
+
+`output_tokens` is never cached for any provider, so it needs no such adjustment.
+
+One known asymmetry: Claude Code's API also reports `cache_creation_input_tokens` (the cost of
+*writing* a new cache entry — a premium-priced, fresh-content category, not a discounted-reuse one).
+That's not captured yet; it's a different economic category than `cached_input_tokens` and would
+need its own pricing treatment.
+
+---
+
 ## Stack
 
 | Layer | Choice |
