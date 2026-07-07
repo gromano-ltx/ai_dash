@@ -110,6 +110,32 @@ def _sample_session(*, second_token_count_is_higher=True) -> str:
                 "rate_limits": {"primary": None, "secondary": None},
             },
         }),
+        # Verified real-world artifact: every token_count event is logged twice
+        # consecutively. Must not be double-counted.
+        _line({
+            "timestamp": "2026-04-16T16:02:10.000Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": {
+                        "input_tokens": 1000,
+                        "cached_input_tokens": 0,
+                        "output_tokens": 50,
+                        "reasoning_output_tokens": 20,
+                        "total_tokens": 1050,
+                    },
+                    "last_token_usage": {"input_tokens": 1000, "cached_input_tokens": 0, "output_tokens": 50, "reasoning_output_tokens": 20, "total_tokens": 1050},
+                    "model_context_window": 272000,
+                },
+                "rate_limits": {"primary": None, "secondary": None},
+            },
+        }),
+        # Second turn: cumulative total_token_usage grows to input=3010 (of
+        # which 1500 is cached, carried over from turn 1's context), output=128.
+        # last_token_usage is THIS turn's own delta: input=2010 (of which 1500
+        # is cached — i.e. 510 genuinely new), output=78.
+        # Sanity check: 1000+2010=3010 (total.input), 50+78=128 (total.output).
         _line({
             "timestamp": "2026-04-16T16:02:20.000Z",
             "type": "event_msg",
@@ -118,12 +144,44 @@ def _sample_session(*, second_token_count_is_higher=True) -> str:
                 "info": {
                     "total_token_usage": {
                         "input_tokens": 3010 if second_token_count_is_higher else 500,
-                        "cached_input_tokens": 0,
+                        "cached_input_tokens": 1500,
                         "output_tokens": 128 if second_token_count_is_higher else 10,
                         "reasoning_output_tokens": 64,
                         "total_tokens": 3138 if second_token_count_is_higher else 510,
                     },
-                    "last_token_usage": {},
+                    "last_token_usage": {
+                        "input_tokens": 2010,
+                        "cached_input_tokens": 1500,
+                        "output_tokens": 78,
+                        "reasoning_output_tokens": 44,
+                        "total_tokens": 2088,
+                    },
+                    "model_context_window": 272000,
+                },
+                "rate_limits": {"primary": None, "secondary": None},
+            },
+        }),
+        # Duplicate of the second turn's event — must not be double-counted either.
+        _line({
+            "timestamp": "2026-04-16T16:02:20.000Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": {
+                        "input_tokens": 3010 if second_token_count_is_higher else 500,
+                        "cached_input_tokens": 1500,
+                        "output_tokens": 128 if second_token_count_is_higher else 10,
+                        "reasoning_output_tokens": 64,
+                        "total_tokens": 3138 if second_token_count_is_higher else 510,
+                    },
+                    "last_token_usage": {
+                        "input_tokens": 2010,
+                        "cached_input_tokens": 1500,
+                        "output_tokens": 78,
+                        "reasoning_output_tokens": 44,
+                        "total_tokens": 2088,
+                    },
                     "model_context_window": 272000,
                 },
                 "rate_limits": {"primary": None, "secondary": None},
@@ -147,13 +205,27 @@ def test_parse_transcript_content_uses_model_from_turn_context():
     assert run.model == "gpt-5-codex"
 
 
-def test_parse_transcript_content_uses_last_token_count_not_summed():
+def test_parse_transcript_content_sums_new_input_tokens_excluding_cached():
     run = parse_transcript_content(_sample_session())
-    # Last token_count event has input=3010/output=128 — must NOT be
-    # 1000+3010=4010 (summed); summing would wildly over-count since each
-    # event already carries the whole-session-so-far cumulative total.
-    assert run.input_tokens == 3010
+    # Turn 1 (deduped despite being logged twice): last_token_usage input=1000,
+    # cached=0 → new=1000. Turn 2 (deduped): last_token_usage input=2010,
+    # cached=1500 → new=510. Total: 1000+510=1510 — NOT the old last-cumulative
+    # value (3010), which double-counted turn 1's context inside turn 2's
+    # cumulative total.
+    assert run.input_tokens == 1510
+
+
+def test_parse_transcript_content_output_tokens_unaffected_by_fix():
+    run = parse_transcript_content(_sample_session())
+    # output_tokens still uses the last cumulative total_token_usage.output_tokens
+    # value — output is never cached, so this was already correct.
     assert run.output_tokens == 128
+
+
+def test_parse_transcript_content_captures_cached_input_tokens_in_meta():
+    run = parse_transcript_content(_sample_session())
+    # Turn 1 cached=0, turn 2 cached=1500 (each deduped despite being logged twice).
+    assert run.meta["cached_input_tokens"] == 1500
 
 
 def test_parse_transcript_content_extracts_commit_hash():
@@ -238,5 +310,6 @@ def test_parse_transcript_content_handles_null_total_token_usage():
     assert run is not None
     # Preserves the last valid (non-null) token counts rather than crashing
     # or silently resetting to 0.
-    assert run.input_tokens == 3010
+    assert run.input_tokens == 1510
     assert run.output_tokens == 128
+    assert run.meta["cached_input_tokens"] == 1500

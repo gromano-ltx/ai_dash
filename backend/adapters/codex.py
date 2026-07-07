@@ -52,6 +52,8 @@ def parse_transcript_content(
 
     input_tokens = 0
     output_tokens = 0
+    cached_input_tokens = 0
+    last_seen_usage_key = None
 
     for event in events:
         etype = event.get('type')
@@ -121,8 +123,21 @@ def parse_transcript_content(
             info = payload.get('info')
             if info:
                 usage = info.get('total_token_usage') or {}
-                input_tokens = usage.get('input_tokens', input_tokens)
-                output_tokens = usage.get('output_tokens', output_tokens)
+                if usage:
+                    output_tokens = usage.get('output_tokens', output_tokens)
+                last = info.get('last_token_usage') or {}
+                usage_key = (usage.get('input_tokens'), usage.get('output_tokens')) if usage else None
+                # token_count events are logged twice consecutively (verified
+                # against real Codex session data) — dedupe by only counting a
+                # turn's delta once its cumulative total_token_usage snapshot
+                # actually changes from the last one seen (Codex events carry
+                # no id field to dedupe by directly, unlike Gemini's).
+                if last and usage_key is not None and usage_key != last_seen_usage_key:
+                    li = last.get('input_tokens', 0)
+                    lc = last.get('cached_input_tokens', 0)
+                    input_tokens += max(li - lc, 0)
+                    cached_input_tokens += lc
+                    last_seen_usage_key = usage_key
 
     if not session_id:
         session_id = next(
@@ -162,5 +177,5 @@ def parse_transcript_content(
         git_prs=list(dict.fromkeys(git_prs)),
         ticket_refs=ticket_refs,
         parent_id=parent_id,
-        meta={"git_branch": git_branch, "cwd": cwd, "github_repo": github_repo},
+        meta={"git_branch": git_branch, "cwd": cwd, "github_repo": github_repo, "cached_input_tokens": cached_input_tokens},
     )
