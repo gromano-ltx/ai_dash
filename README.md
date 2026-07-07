@@ -1,6 +1,6 @@
 # ai-dash
 
-Observability dashboard for AI coding agents. Tracks runs, token usage, commits, and PRs across Claude Code, OpenAI, and Gemini in a single read-only UI.
+Observability dashboard for AI coding agents. Tracks runs, token usage, estimated cost, commits, and PRs across Claude Code, OpenAI, and Gemini in a single read-only UI.
 
 **Live:** https://dash.ai-coordinator.io
 
