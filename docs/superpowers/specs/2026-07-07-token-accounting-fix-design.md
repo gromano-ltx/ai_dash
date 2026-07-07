@@ -101,6 +101,18 @@ rather than introducing a new migration mechanism:
   Codex rows show reduced `input_tokens` and a populated `meta.cached_input_tokens`, and that a
   freshly-ingested Codex or Gemini session shows the corrected accounting from the start.
 
+## Documentation
+
+Add a new `## Token accounting` section to `README.md` (placed after the existing `## Architecture`
+section, matching that section's terse/diagram-friendly style) explaining: what `input_tokens`
+means per provider now that all three share one methodology (sum of fresh/non-cached tokens across
+turns), what `meta.cached_input_tokens` captures and why it's tracked separately (prep for accurate
+$ cost once cached vs. fresh tokens are priced differently), and the one deliberate asymmetry left
+in place (Claude's `cache_creation_input_tokens` isn't captured yet — a premium-priced fresh-write
+category, not a discounted-reuse one). This is the natural place for a future reader (or future
+AI-5 work) to understand why the numbers mean what they mean, without re-deriving it from the
+adapter source.
+
 ## Out of scope
 
 - AI-5's actual cost/$ calculation logic — this ticket only fixes the token *counts* and captures
