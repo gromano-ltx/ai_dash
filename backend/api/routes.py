@@ -12,7 +12,7 @@ from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore, User
 from backend.auth import get_optional_user, require_admin
 from backend import sse as sse_bus
 from backend.adapters import claude_code, codex, gemini_cli
-from backend.watcher import _upsert
+from backend.watcher import _upsert, MIN_TOKENS_TO_PERSIST
 
 PROVIDERS = ("anthropic", "openai", "gemini")
 PROVIDER_ADAPTERS = {
@@ -362,7 +362,7 @@ async def ingest_transcript(
     if not run:
         raise HTTPException(status_code=422, detail="Could not parse transcript")
     total_tokens = run.input_tokens + run.output_tokens
-    if total_tokens < 150:
+    if total_tokens < MIN_TOKENS_TO_PERSIST:
         return {"id": run.id, "status": "skipped"}
     run.user = api_key.user
     run_id, run_status = run.id, run.status
