@@ -134,20 +134,27 @@ def delete_runs(
 
     deleted: list[str] = []
     not_found: list[str] = []
+    processed: set[str] = set()
 
     for run_id in ids:
+        if run_id in processed:
+            continue
+
         run = session.get(AgentRun, run_id)
         if not run:
             not_found.append(run_id)
+            processed.add(run_id)
             continue
 
         children = session.exec(select(AgentRun).where(AgentRun.parent_id == run_id)).all()
         for child in children:
             _delete_run_and_transcript(session, child)
             deleted.append(child.id)
+            processed.add(child.id)
 
         _delete_run_and_transcript(session, run)
         deleted.append(run.id)
+        processed.add(run.id)
 
     session.commit()
     logger.info(f"[admin] {current.username} deleted runs: {deleted}")

@@ -125,3 +125,16 @@ def test_delete_runs_logs_admin_username_and_ids(test_client, caplog):
         test_client.request("DELETE", "/api/runs", json={"ids": ["run1"]})
 
     assert any("gabby" in r.message and "run1" in r.message for r in caplog.records)
+
+
+def test_delete_runs_does_not_double_report_child_requested_alongside_parent(test_client):
+    _login_admin(test_client)
+    _seed_run("parent1")
+    _seed_run("child1", parent_id="parent1")
+
+    res = test_client.request("DELETE", "/api/runs", json={"ids": ["parent1", "child1"]})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert set(body["deleted"]) == {"parent1", "child1"}
+    assert body["not_found"] == []
