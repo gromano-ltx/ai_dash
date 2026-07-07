@@ -48,6 +48,11 @@ def _add_missing_columns():
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE agent_runs ADD COLUMN updated_at TIMESTAMP"))
         logger.info("[db] added agent_runs.updated_at column")
+    for column in ("estimated_input_cost_usd", "estimated_output_cost_usd", "estimated_cost_usd"):
+        if column not in existing_columns:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE agent_runs ADD COLUMN {column} FLOAT"))
+            logger.info(f"[db] added agent_runs.{column} column")
 
 
 def get_session():
@@ -149,3 +154,24 @@ def _seed():
                     session.add(r)
                 session.commit()
                 print(f"[db] backfilled ended_at for {len(stuck)} runs stuck done with null duration")
+            # One-time backfill: existing rows already have model/input_tokens/
+            # output_tokens stored, so cost can be computed retroactively,
+            # unlike the ended_at backfill above where the source data for old
+            # rows didn't exist. Only touches rows where estimated_cost_usd is
+            # still NULL, so it's naturally idempotent and self-heals rows
+            # whose model tier gets added to PRICING after they were ingested.
+            from backend.pricing import estimate_cost
+
+            uncosted = session.exec(
+                select(AgentRun).where(AgentRun.estimated_cost_usd == None)  # noqa: E711
+            ).all()
+            if uncosted:
+                for r in uncosted:
+                    cost = estimate_cost(r.provider, r.model, r.input_tokens, r.output_tokens)
+                    if cost:
+                        r.estimated_input_cost_usd = cost.input_usd
+                        r.estimated_output_cost_usd = cost.output_usd
+                        r.estimated_cost_usd = cost.total_usd
+                        session.add(r)
+                session.commit()
+                print(f"[db] backfilled estimated cost for {len(uncosted)} runs")
