@@ -1,6 +1,7 @@
 import gzip
 import json
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from sqlmodel import Session, select
@@ -30,6 +31,9 @@ def _select_parser(provider: str):
 
 MAX_COMPRESSED_BYTES = 10 * 1024 * 1024   # 10 MB compressed
 MAX_INGEST_BYTES = 100 * 1024 * 1024      # 100 MB decompressed
+MAX_DELETE_BATCH = 100                    # hard cap on ids per DELETE /runs call
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -111,6 +115,84 @@ def get_run(
     if current_user and not current_user.is_admin and run.user != current_user.username:
         raise HTTPException(status_code=404, detail="Run not found")
     return _to_read(run, _parents_with_running_children(session, [run_id]))
+
+
+@router.delete("/runs")
+def delete_runs(
+    body: dict,
+    current: User = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        raise HTTPException(status_code=422, detail="ids must be a list of strings")
+    if len(ids) > MAX_DELETE_BATCH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot delete more than {MAX_DELETE_BATCH} runs per request",
+        )
+    dry_run = bool(body.get("dry_run", False))
+
+    deleted: list[str] = []
+    not_found: list[str] = []
+    processed: set[str] = set()
+    # Captured before any deletion so the audit log still means something
+    # once the rows are gone.
+    audit_entries: list[dict] = []
+
+    for run_id in ids:
+        if run_id in processed:
+            continue
+
+        run = session.get(AgentRun, run_id)
+        if not run:
+            not_found.append(run_id)
+            processed.add(run_id)
+            continue
+
+        children = session.exec(select(AgentRun).where(AgentRun.parent_id == run_id)).all()
+        for child in children:
+            if child.id in processed:
+                continue
+            audit_entries.append(_describe_run(child))
+            if not dry_run:
+                _delete_run_and_transcript(session, child)
+            deleted.append(child.id)
+            processed.add(child.id)
+
+        audit_entries.append(_describe_run(run))
+        if not dry_run:
+            _delete_run_and_transcript(session, run)
+        deleted.append(run.id)
+        processed.add(run.id)
+
+    if dry_run:
+        return {"deleted": deleted, "not_found": not_found}
+
+    session.commit()
+    summary = ", ".join(
+        f"{e['id']} (provider={e['provider']}, user={e['user']}, started_at={e['started_at']})"
+        for e in audit_entries
+    )
+    logger.info(f"[admin] {current.username} deleted runs: {summary}")
+    return {"deleted": deleted, "not_found": not_found}
+
+
+def _describe_run(run: AgentRun) -> dict:
+    """Capture identifying fields before deletion for audit logging."""
+    return {
+        "id": run.id,
+        "provider": run.provider,
+        "user": run.user,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+    }
+
+
+def _delete_run_and_transcript(session: Session, run: AgentRun) -> None:
+    stored = session.get(TranscriptStore, run.id)
+    if stored:
+        session.delete(stored)
+    session.delete(run)
 
 
 @router.get("/providers")
