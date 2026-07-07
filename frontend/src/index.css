@@ -4,8 +4,10 @@
 
 body {
   margin: 0;
-  background: #020617;
-  color: #f1f5f9;
+  background: #15130f;
+  color: #e8e2d4;
+  font-family: "Archivo", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 #root {

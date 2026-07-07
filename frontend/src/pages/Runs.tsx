@@ -38,8 +38,8 @@ export function Runs() {
   return (
     <div className="p-6 space-y-5">
       <div>
-        <h1 className="text-lg font-mono font-semibold text-slate-100">Runs</h1>
-        <p className="text-sm text-slate-500 mt-0.5">
+        <h1 className="text-lg font-sans font-semibold text-ledger-ink">Runs</h1>
+        <p className="text-sm font-mono text-ledger-faint mt-0.5">
           Showing {runs?.length ?? 0} results (page {page + 1})
         </p>
       </div>
@@ -53,7 +53,7 @@ export function Runs() {
             key={label}
             value={value}
             onChange={(e) => set(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono focus:outline-none focus:border-slate-500"
+            className="bg-ledger-surface border border-ledger-rule text-ledger-dim text-sm px-3 py-1.5 font-mono focus:outline-none focus:border-ledger-faint"
           >
             {options.map((o) => (
               <option key={o} value={o}>{o || label}</option>
@@ -64,7 +64,7 @@ export function Runs() {
           <select
             value={user}
             onChange={(e) => setUser(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono focus:outline-none focus:border-slate-500"
+            className="bg-ledger-surface border border-ledger-rule text-ledger-dim text-sm px-3 py-1.5 font-mono focus:outline-none focus:border-ledger-faint"
           >
             <option value="">User</option>
             {usersData?.users.map((u) => (
@@ -76,52 +76,52 @@ export function Runs() {
           placeholder="Ticket (e.g. LINEAR-123)"
           value={ticket}
           onChange={(e) => setTicket(e.target.value)}
-          className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono focus:outline-none focus:border-slate-500 w-48"
+          className="bg-ledger-surface border border-ledger-rule text-ledger-dim text-sm px-3 py-1.5 font-mono focus:outline-none focus:border-ledger-faint w-48"
         />
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
+      <div className="bg-ledger-surface border border-ledger-rule overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
           <thead>
-            <tr className="border-b border-slate-800">
+            <tr className="border-b border-ledger-rule">
               {["Task", "Provider", "Model", "User", "Status", "Duration", "Tokens", "Ticket", "Code"].map((h) => (
-                <th key={h} className="text-left px-4 py-2.5 text-xs font-mono text-slate-500 font-normal whitespace-nowrap">{h}</th>
+                <th key={h} className="text-left px-4 py-2.5 text-xs font-sans text-ledger-faint uppercase tracking-wider font-normal whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-600 font-mono text-sm">loading…</td></tr>
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-ledger-faint font-mono text-sm">loading…</td></tr>
             )}
             {runs?.map((run) => (
               <tr
                 key={run.id}
                 onClick={() => navigate(`/runs/${run.id}`)}
-                className="border-b border-slate-800/50 hover:bg-slate-800/40 cursor-pointer transition-colors"
+                className="border-b border-ledger-rule/50 hover:bg-ledger-raised/40 cursor-pointer transition-colors"
               >
                 <td className="px-4 py-3 max-w-xs">
-                  <p className="text-slate-200 truncate">{run.label}</p>
+                  <p className="text-ledger-ink font-sans truncate">{run.label}</p>
                 </td>
                 <td className="px-4 py-3"><ProviderBadge provider={run.provider} /></td>
-                <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{run.model}</td>
-                <td className="px-4 py-3 text-slate-400 font-mono text-xs">{run.user ?? "—"}</td>
+                <td className="px-4 py-3 text-ledger-dim font-mono text-xs whitespace-nowrap">{run.model}</td>
+                <td className="px-4 py-3 text-ledger-dim font-mono text-xs">{run.user ?? "—"}</td>
                 <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
-                <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{duration(run.duration_seconds)}</td>
-                <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{fmt(run.input_tokens + run.output_tokens)}</td>
+                <td className="px-4 py-3 text-ledger-dim font-mono text-xs whitespace-nowrap tabular-nums">{duration(run.duration_seconds)}</td>
+                <td className="px-4 py-3 text-ledger-dim font-mono text-xs whitespace-nowrap text-right tabular-nums">{fmt(run.input_tokens + run.output_tokens)}</td>
                 <td className="px-4 py-3 text-xs font-mono">
                   {run.ticket_refs.length > 1
-                    ? <span className="text-violet-400">{run.ticket_refs.length} tickets</span>
+                    ? <span className="text-ledger-accent">{run.ticket_refs.length} tickets</span>
                     : run.ticket_refs[0]
                     ? (() => {
                         const url = ticketUrl(run.ticket_refs[0]);
                         return url
                           ? <a href={url} target="_blank" rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              className="text-violet-400 hover:underline">{run.ticket_refs[0]}</a>
-                          : <span className="text-violet-400">{run.ticket_refs[0]}</span>;
+                              className="text-ledger-accent hover:underline">{run.ticket_refs[0]}</a>
+                          : <span className="text-ledger-accent">{run.ticket_refs[0]}</span>;
                       })()
-                    : <span className="text-slate-600">—</span>}
+                    : <span className="text-ledger-faint">—</span>}
                 </td>
                 <td className="px-4 py-3 text-xs font-mono">
                   {run.git_prs.length > 1
@@ -131,29 +131,29 @@ export function Runs() {
                         return base
                           ? <a href={`${base}/pulls`} target="_blank" rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              className="text-blue-400 hover:underline">{label}</a>
-                          : <span className="text-slate-300">{label}</span>;
+                              className="text-provider-gemini hover:underline">{label}</a>
+                          : <span className="text-ledger-dim">{label}</span>;
                       })()
                     : run.git_prs.length > 0
                     ? <a href={run.git_prs[0]} target="_blank" rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="text-blue-400 hover:underline">
+                        className="text-provider-gemini hover:underline">
                         {prLabel(run.git_prs[0])}
-                        {run.git_commits.length > 1 && <span className="text-slate-500 ml-1">({run.git_commits.length} commits)</span>}
+                        {run.git_commits.length > 1 && <span className="text-ledger-faint ml-1">({run.git_commits.length} commits)</span>}
                       </a>
                     : run.git_commits.length > 0
                     ? (() => {
                         const hash = run.git_commits[0];
                         const url = commitUrl(hash, run.meta?.github_repo, run.git_prs);
                         const label = hash.slice(0, 7);
-                        const extra = run.git_commits.length > 1 && <span className="text-slate-500 ml-1">+{run.git_commits.length - 1}</span>;
+                        const extra = run.git_commits.length > 1 && <span className="text-ledger-faint ml-1">+{run.git_commits.length - 1}</span>;
                         return url
                           ? <a href={url} target="_blank" rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              className="text-blue-400 hover:underline">{label}{extra}</a>
-                          : <span className="text-slate-300">{label}{extra}</span>;
+                              className="text-provider-gemini hover:underline">{label}{extra}</a>
+                          : <span className="text-ledger-dim">{label}{extra}</span>;
                       })()
-                    : <span className="text-slate-600">—</span>}
+                    : <span className="text-ledger-faint">—</span>}
                 </td>
               </tr>
             ))}
@@ -167,7 +167,7 @@ export function Runs() {
           type="button"
           onClick={() => setPage((p) => Math.max(0, p - 1))}
           disabled={page === 0}
-          className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-slate-500"
+          className="bg-ledger-surface border border-ledger-rule text-ledger-dim text-sm px-3 py-1.5 font-mono disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-ledger-faint"
         >
           Previous
         </button>
@@ -175,7 +175,7 @@ export function Runs() {
           type="button"
           onClick={() => setPage((p) => p + 1)}
           disabled={!hasNextPage}
-          className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-slate-500"
+          className="bg-ledger-surface border border-ledger-rule text-ledger-dim text-sm px-3 py-1.5 font-mono disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-ledger-faint"
         >
           Next
         </button>
