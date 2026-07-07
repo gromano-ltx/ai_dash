@@ -1,7 +1,7 @@
-const STYLES: Record<string, string> = {
-  anthropic: "bg-violet-500/20 text-violet-300 border border-violet-500/30",
-  openai: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
-  gemini: "bg-blue-500/20 text-blue-300 border border-blue-500/30",
+const COLORS: Record<string, string> = {
+  anthropic: "text-provider-anthropic border-provider-anthropic/50",
+  openai: "text-provider-openai border-provider-openai/50",
+  gemini: "text-provider-gemini border-provider-gemini/50",
 };
 
 const LABELS: Record<string, string> = {
@@ -12,7 +12,11 @@ const LABELS: Record<string, string> = {
 
 export function ProviderBadge({ provider }: { provider: string }) {
   return (
-    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-mono ${STYLES[provider] ?? "bg-slate-700 text-slate-400"}`}>
+    <span
+      className={`inline-block px-1.5 pb-0.5 text-xs font-mono uppercase tracking-wider border-b ${
+        COLORS[provider] ?? "text-ledger-faint border-ledger-rule"
+      }`}
+    >
       {LABELS[provider] ?? provider}
     </span>
   );

@@ -1,13 +1,13 @@
 export function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    running: "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30",
-    done: "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30",
-    failed: "bg-red-500/20 text-red-400 border border-red-500/30",
+    running: "text-ledger-amber",
+    done: "text-ledger-dim",
+    failed: "text-ledger-accent",
   };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-mono ${styles[status] ?? "bg-slate-700 text-slate-400"}`}>
+    <span className={`inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider ${styles[status] ?? "text-ledger-faint"}`}>
       {status === "running" && (
-        <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+        <span className="w-1.5 h-1.5 rounded-full bg-ledger-amber animate-pulse" />
       )}
       {status}
     </span>
