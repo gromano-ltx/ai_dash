@@ -138,3 +138,69 @@ def test_delete_runs_does_not_double_report_child_requested_alongside_parent(tes
     body = res.json()
     assert set(body["deleted"]) == {"parent1", "child1"}
     assert body["not_found"] == []
+
+
+def test_delete_runs_dry_run_does_not_delete_anything(test_client):
+    _login_admin(test_client)
+    _seed_run("run1")
+
+    res = test_client.request("DELETE", "/api/runs", json={"ids": ["run1"], "dry_run": True})
+
+    assert res.status_code == 200
+    assert res.json() == {"deleted": ["run1"], "not_found": []}
+    with Session(db_module.engine) as session:
+        # Nothing actually deleted.
+        assert session.get(AgentRun, "run1") is not None
+        assert session.get(TranscriptStore, "run1") is not None
+
+
+def test_delete_runs_dry_run_reports_cascaded_children_without_deleting(test_client):
+    _login_admin(test_client)
+    _seed_run("parent1")
+    _seed_run("child1", parent_id="parent1")
+
+    res = test_client.request("DELETE", "/api/runs", json={"ids": ["parent1"], "dry_run": True})
+
+    assert res.status_code == 200
+    assert set(res.json()["deleted"]) == {"parent1", "child1"}
+    with Session(db_module.engine) as session:
+        assert session.get(AgentRun, "parent1") is not None
+        assert session.get(AgentRun, "child1") is not None
+
+
+def test_delete_runs_dry_run_still_enforces_batch_cap(test_client):
+    _login_admin(test_client)
+
+    res = test_client.request(
+        "DELETE", "/api/runs", json={"ids": [f"id-{i}" for i in range(101)], "dry_run": True}
+    )
+
+    assert res.status_code == 422
+
+
+def test_delete_runs_logs_provider_and_user_not_just_ids(test_client, caplog):
+    _login_admin(test_client)
+    with Session(db_module.engine) as session:
+        session.add(AgentRun(id="run1", provider="gemini", model="gemini-3.5-flash", user="alice"))
+        session.commit()
+
+    with caplog.at_level(logging.INFO, logger="backend.api.routes"):
+        test_client.request("DELETE", "/api/runs", json={"ids": ["run1"]})
+
+    message = " ".join(r.message for r in caplog.records)
+    assert "gemini" in message
+    assert "alice" in message
+
+
+def test_delete_runs_reverse_order_cascade_dedup_explicit(test_client):
+    # child listed before its parent in the request — exercises the explicit
+    # processed check in the cascade loop, not just autoflush timing.
+    _login_admin(test_client)
+    _seed_run("parent1")
+    _seed_run("child1", parent_id="parent1")
+
+    res = test_client.request("DELETE", "/api/runs", json={"ids": ["child1", "parent1"]})
+
+    assert res.status_code == 200
+    assert set(res.json()["deleted"]) == {"parent1", "child1"}
+    assert res.json()["not_found"] == []

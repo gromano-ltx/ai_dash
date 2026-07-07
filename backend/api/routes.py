@@ -131,10 +131,14 @@ def delete_runs(
             status_code=422,
             detail=f"Cannot delete more than {MAX_DELETE_BATCH} runs per request",
         )
+    dry_run = bool(body.get("dry_run", False))
 
     deleted: list[str] = []
     not_found: list[str] = []
     processed: set[str] = set()
+    # Captured before any deletion so the audit log still means something
+    # once the rows are gone.
+    audit_entries: list[dict] = []
 
     for run_id in ids:
         if run_id in processed:
@@ -148,17 +152,40 @@ def delete_runs(
 
         children = session.exec(select(AgentRun).where(AgentRun.parent_id == run_id)).all()
         for child in children:
-            _delete_run_and_transcript(session, child)
+            if child.id in processed:
+                continue
+            audit_entries.append(_describe_run(child))
+            if not dry_run:
+                _delete_run_and_transcript(session, child)
             deleted.append(child.id)
             processed.add(child.id)
 
-        _delete_run_and_transcript(session, run)
+        audit_entries.append(_describe_run(run))
+        if not dry_run:
+            _delete_run_and_transcript(session, run)
         deleted.append(run.id)
         processed.add(run.id)
 
+    if dry_run:
+        return {"deleted": deleted, "not_found": not_found}
+
     session.commit()
-    logger.info(f"[admin] {current.username} deleted runs: {deleted}")
+    summary = ", ".join(
+        f"{e['id']} (provider={e['provider']}, user={e['user']}, started_at={e['started_at']})"
+        for e in audit_entries
+    )
+    logger.info(f"[admin] {current.username} deleted runs: {summary}")
     return {"deleted": deleted, "not_found": not_found}
+
+
+def _describe_run(run: AgentRun) -> dict:
+    """Capture identifying fields before deletion for audit logging."""
+    return {
+        "id": run.id,
+        "provider": run.provider,
+        "user": run.user,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+    }
 
 
 def _delete_run_and_transcript(session: Session, run: AgentRun) -> None:
