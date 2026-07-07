@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { useRuns, useUsers } from "../lib/api";
-import { useActiveUser } from "../lib/UserContext";
+import { useRuns, useUsers, useMe } from "../lib/api";
 import { fmt, duration } from "../lib/format";
 import { StatusBadge } from "../components/StatusBadge";
 import { ProviderBadge } from "../components/ProviderBadge";
@@ -15,13 +14,12 @@ export function Runs() {
   const [user, setUser] = useState("");
   const [ticket, setTicket] = useState("");
   const [page, setPage] = useState(0);
+  const { data: me } = useMe();
   const { data: usersData } = useUsers();
-  const { user: globalUser } = useActiveUser();
-  const effectiveUser = user || globalUser || undefined;
   const { data: runs, isLoading } = useRuns({
     provider: provider || undefined,
     status: status || undefined,
-    user: effectiveUser,
+    user: user || undefined,
     ticket: ticket || undefined,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
@@ -31,7 +29,7 @@ export function Runs() {
   // Reset to the first page whenever any filter changes.
   useEffect(() => {
     setPage(0);
-  }, [provider, status, effectiveUser, ticket]);
+  }, [provider, status, user, ticket]);
 
   // No total-count endpoint exists, so infer "more pages" from a full page
   // coming back — a short page means this was the last one.
@@ -62,16 +60,18 @@ export function Runs() {
             ))}
           </select>
         ))}
-        <select
-          value={user}
-          onChange={(e) => setUser(e.target.value)}
-          className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono focus:outline-none focus:border-slate-500"
-        >
-          <option value="">User</option>
-          {usersData?.users.map((u) => (
-            <option key={u} value={u}>{u}</option>
-          ))}
-        </select>
+        {me?.is_admin && (
+          <select
+            value={user}
+            onChange={(e) => setUser(e.target.value)}
+            className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-1.5 font-mono focus:outline-none focus:border-slate-500"
+          >
+            <option value="">User</option>
+            {usersData?.users.map((u) => (
+              <option key={u} value={u}>{u}</option>
+            ))}
+          </select>
+        )}
         <input
           placeholder="Ticket (e.g. LINEAR-123)"
           value={ticket}
@@ -110,8 +110,6 @@ export function Runs() {
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{duration(run.duration_seconds)}</td>
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{fmt(run.input_tokens + run.output_tokens)}</td>
                 <td className="px-4 py-3 text-xs font-mono">
-                  {/* 2+ tickets: an aggregate count, not "the first one" — a long
-                      session can genuinely touch many unrelated tickets. */}
                   {run.ticket_refs.length > 1
                     ? <span className="text-violet-400">{run.ticket_refs.length} tickets</span>
                     : run.ticket_refs[0]
@@ -126,8 +124,6 @@ export function Runs() {
                     : <span className="text-slate-600">—</span>}
                 </td>
                 <td className="px-4 py-3 text-xs font-mono">
-                  {/* Same reasoning: 2+ PRs get an honest aggregate instead of
-                      picking git_prs[0] as if it were "the" PR for this run. */}
                   {run.git_prs.length > 1
                     ? (() => {
                         const base = repoBase(run.git_prs[0]);

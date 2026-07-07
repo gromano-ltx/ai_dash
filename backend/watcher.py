@@ -27,7 +27,7 @@ async def watch() -> None:
             for path in changed:
                 run = parse_transcript(path)
                 if run and _upsert(run):
-                    await sse.broadcast({"type": "run_updated", "id": run.id})
+                    await sse.broadcast({"type": "run_updated", "id": run.id, "user": run.user})
     except asyncio.CancelledError:
         raise
     except Exception as exc:

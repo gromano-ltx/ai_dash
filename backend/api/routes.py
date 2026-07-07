@@ -7,7 +7,8 @@ from sqlmodel import Session, select
 from typing import Optional
 from sse_starlette.sse import EventSourceResponse
 from backend.db import get_session
-from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore
+from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore, User
+from backend.auth import get_optional_user, require_admin
 from backend import sse as sse_bus
 from backend.adapters import claude_code, codex, gemini_cli
 from backend.watcher import _upsert
@@ -46,8 +47,11 @@ def _visible_runs_query():
     )
 
 
-def _visible_runs(session: Session) -> list[AgentRun]:
-    return session.exec(_visible_runs_query()).all()
+def _visible_runs(session: Session, user: Optional[User] = None) -> list[AgentRun]:
+    runs = session.exec(_visible_runs_query()).all()
+    if user and not user.is_admin:
+        runs = [r for r in runs if r.user == user.username]
+    return runs
 
 
 @router.get("/runs", response_model=list[AgentRunRead])
@@ -60,6 +64,7 @@ def list_runs(
     include_children: bool = False,
     limit: int = Query(50, le=500),
     offset: int = 0,
+    current_user: Optional[User] = Depends(get_optional_user),
     session: Session = Depends(get_session),
 ):
     query = select(AgentRun).where(
@@ -71,6 +76,11 @@ def list_runs(
         query = query.where(AgentRun.status == status)
     if user:
         query = query.where(AgentRun.user == user)
+    if current_user and not current_user.is_admin:
+        # Non-admins are always scoped to themselves, regardless of what
+        # `user` was requested — this is the security boundary, not just
+        # a default.
+        query = query.where(AgentRun.user == current_user.username)
     if parent_id is not None:
         query = query.where(AgentRun.parent_id == parent_id)
     elif not include_children:
@@ -90,22 +100,34 @@ def list_runs(
 
 
 @router.get("/runs/{run_id}", response_model=AgentRunRead)
-def get_run(run_id: str, session: Session = Depends(get_session)):
+def get_run(
+    run_id: str,
+    current_user: Optional[User] = Depends(get_optional_user),
+    session: Session = Depends(get_session),
+):
     run = session.get(AgentRun, run_id)
     if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if current_user and not current_user.is_admin and run.user != current_user.username:
         raise HTTPException(status_code=404, detail="Run not found")
     return _to_read(run, _parents_with_running_children(session, [run_id]))
 
 
 @router.get("/providers")
-def list_providers(session: Session = Depends(get_session)):
-    runs = _visible_runs(session)
+def list_providers(
+    current_user: Optional[User] = Depends(get_optional_user),
+    session: Session = Depends(get_session),
+):
+    runs = _visible_runs(session, current_user)
     return {"providers": list({r.provider for r in runs})}
 
 
 @router.get("/users")
-def list_users(session: Session = Depends(get_session)):
-    runs = _visible_runs(session)
+def list_users(
+    current_user: Optional[User] = Depends(get_optional_user),
+    session: Session = Depends(get_session),
+):
+    runs = _visible_runs(session, current_user)
     return {"users": sorted({r.user for r in runs if r.user})}
 
 
@@ -113,9 +135,10 @@ def list_users(session: Session = Depends(get_session)):
 def get_daily(
     user: Optional[str] = None,
     days: int = Query(7, ge=1, le=3650),
+    current_user: Optional[User] = Depends(get_optional_user),
     session: Session = Depends(get_session),
 ):
-    runs = _visible_runs(session)
+    runs = _visible_runs(session, current_user)
     cutoff = datetime.utcnow() - timedelta(days=days)
     recent = [r for r in runs if r.started_at >= cutoff]
     if user:
@@ -142,9 +165,10 @@ def get_daily(
 def get_stats(
     user: Optional[str] = None,
     days: int = Query(7, ge=1, le=3650),
+    current_user: Optional[User] = Depends(get_optional_user),
     session: Session = Depends(get_session),
 ):
-    runs = _visible_runs(session)
+    runs = _visible_runs(session, current_user)
     cutoff = datetime.utcnow() - timedelta(days=days)
     recent = [r for r in runs if r.started_at >= cutoff]
     if user:
@@ -172,7 +196,7 @@ def get_stats(
 
 
 @router.get("/keys")
-def list_keys(session: Session = Depends(get_session)):
+def list_keys(current: User = Depends(require_admin), session: Session = Depends(get_session)):
     keys = session.exec(select(ApiKey).order_by(ApiKey.created_at.desc())).all()
     return [
         {"key_prefix": k.key[:12] + "…", "user": k.user, "created_at": k.created_at}
@@ -181,7 +205,7 @@ def list_keys(session: Session = Depends(get_session)):
 
 
 @router.post("/keys", status_code=201)
-def create_key(body: dict, session: Session = Depends(get_session)):
+def create_key(body: dict, current: User = Depends(require_admin), session: Session = Depends(get_session)):
     user = (body.get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=422, detail="user is required")
@@ -193,7 +217,7 @@ def create_key(body: dict, session: Session = Depends(get_session)):
 
 
 @router.delete("/keys/{key_prefix}")
-def delete_key(key_prefix: str, session: Session = Depends(get_session)):
+def delete_key(key_prefix: str, current: User = Depends(require_admin), session: Session = Depends(get_session)):
     keys = session.exec(select(ApiKey)).all()
     match = next((k for k in keys if k.key.startswith(key_prefix)), None)
     if not match:
@@ -261,12 +285,14 @@ async def ingest_transcript(
     run.user = api_key.user
     run_id, run_status = run.id, run.status
     _upsert(run)
-    await sse_bus.broadcast({"type": "run_updated", "id": run_id})
+    await sse_bus.broadcast({"type": "run_updated", "id": run_id, "user": run.user})
     return {"id": run_id, "status": run_status}
 
 
 @router.get("/stream")
-async def stream_runs():
+async def stream_runs(
+    current_user: Optional[User] = Depends(get_optional_user),
+):
     q = sse_bus.subscribe()
 
     async def generator():
@@ -274,6 +300,13 @@ async def stream_runs():
             while True:
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=30)
+                    if (
+                        current_user
+                        and not current_user.is_admin
+                        and event.get("type") == "run_updated"
+                        and event.get("user") != current_user.username
+                    ):
+                        continue
                     yield {"data": json.dumps(event)}
                 except asyncio.TimeoutError:
                     yield {"data": json.dumps({"type": "ping"})}

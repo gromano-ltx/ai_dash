@@ -20,3 +20,9 @@ variable "dashboard_password" {
   type        = string
   sensitive   = true
 }
+
+variable "session_secret" {
+  description = "Secret key used to sign per-user login session cookies"
+  type        = string
+  sensitive   = true
+}

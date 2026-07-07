@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useStats, useDaily } from "../lib/api";
-import { useActiveUser } from "../lib/UserContext";
 import { fmt } from "../lib/format";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -84,10 +83,9 @@ const TIME_RANGES = [
 ];
 
 export function Dashboard() {
-  const { user } = useActiveUser();
   const [days, setDays] = useState(7);
-  const { data: stats } = useStats(user || undefined, days);
-  const { data: daily } = useDaily(user || undefined, days);
+  const { data: stats } = useStats(undefined, days);
+  const { data: daily } = useDaily(undefined, days);
 
   const totalTokens = stats
     ? stats.total_input_tokens_7d + stats.total_output_tokens_7d

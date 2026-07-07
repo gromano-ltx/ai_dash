@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { useUsers } from "../lib/api";
-import { useActiveUser } from "../lib/UserContext";
+import { useMe, logout } from "../lib/api";
 
 const nav = [
   { to: "/", label: "Overview", icon: "⬡" },
@@ -10,8 +9,7 @@ const nav = [
 ];
 
 export function Layout() {
-  const { data: usersData } = useUsers();
-  const { user, setUser } = useActiveUser();
+  const { data: me } = useMe();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
@@ -25,19 +23,18 @@ export function Layout() {
           <span className="text-sm font-mono font-semibold text-slate-100 tracking-wide">ai_dash</span>
           <span className="ml-2 text-xs text-slate-500">v0.1</span>
         </div>
-        <div className="px-3 py-2.5 border-b border-slate-800">
-          <label className="text-xs text-slate-500 font-mono block mb-1">user:</label>
-          <select
-            value={user}
-            onChange={(e) => setUser(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-slate-500"
-          >
-            <option value="">All users</option>
-            {usersData?.users.map((u) => (
-              <option key={u} value={u}>{u}</option>
-            ))}
-          </select>
-        </div>
+        {me?.username && (
+          <div className="px-3 py-2.5 border-b border-slate-800 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-mono truncate">{me.username}</span>
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="text-xs text-slate-500 hover:text-slate-300 font-mono"
+            >
+              logout
+            </button>
+          </div>
+        )}
         <nav className="flex-1 px-2 py-3 space-y-0.5">
           {nav.map(({ to, label, icon }) => (
             <NavLink

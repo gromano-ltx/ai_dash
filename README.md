@@ -123,9 +123,21 @@ docker buildx build --platform linux/amd64 \
 
 ## Auth
 
-The dashboard is protected by HTTP Basic Auth. Username is ignored; password is the `DASHBOARD_PASSWORD` env var (stored in GCP Secret Manager, set via `terraform.tfvars`).
+New deployments start password-protected: the dashboard is gated by HTTP Basic Auth, using the
+`DASHBOARD_PASSWORD` env var (stored in GCP Secret Manager, set via `terraform.tfvars`). Username
+is ignored — only the password is checked.
 
-API ingest requires an `X-API-Key` header. Keys are seeded in the DB on first startup (`adk_devkey_local` for local dev).
+As soon as the first user account is created (Settings → Users), Basic Auth is retired for that
+deployment and only per-user login (`/login`, session cookie signed with `SESSION_SECRET`, 30-day
+expiry) works from then on. This is a one-way cutover: anyone who created that first account will
+need to log in with it explicitly — their browser's cached Basic Auth credentials stop working on
+the very next request.
+
+Non-admin users only see their own runs. Admins see everyone's runs and can create/revoke
+accounts and API keys from Settings.
+
+API ingest requires an `X-API-Key` header. Keys are seeded in the DB on first startup
+(`adk_devkey_local` for local dev) and are managed from Settings by admins.
 
 ---
 

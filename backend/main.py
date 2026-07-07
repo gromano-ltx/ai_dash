@@ -5,14 +5,34 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from backend.db import init_db
 from backend.api.routes import router
+from backend.api.auth_routes import router as auth_router
 from backend import watcher
 
 _ROOT = Path(__file__).parent.parent
 _FRONTEND = _ROOT / "frontend" / "dist"
+# Path.resolve() on a non-existent path doesn't raise, so this is safe to
+# compute unconditionally even when _FRONTEND doesn't exist (local dev).
+_FRONTEND_RESOLVED = _FRONTEND.resolve()
 _DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+
+
+def _is_static_frontend_asset(path: str) -> bool:
+    """Whether `path` resolves to a real file inside the built frontend dir.
+
+    Used to let the browser fetch its own compiled JS/CSS/static assets
+    (e.g. /assets/index-*.js, /favicon.svg) before it has a session cookie —
+    without this, those requests would get redirected to /login instead of
+    served, and the login page's own script tag would never execute.
+    """
+    if not _FRONTEND.exists():
+        return False
+    target = (_FRONTEND / path.lstrip("/")).resolve()
+    if not target.is_relative_to(_FRONTEND_RESOLVED):
+        return False
+    return target.is_file()
 
 
 async def _cleanup_stale_runs():
@@ -84,32 +104,65 @@ app.add_middleware(
 )
 
 
-_PUBLIC_PATHS = frozenset({"/install.sh", "/collector.py"})
+_PUBLIC_PATHS = frozenset({"/install.sh", "/collector.py", "/login", "/api/login"})
 
 
 @app.middleware("http")
-async def basic_auth(request: Request, call_next):
+async def auth_middleware(request: Request, call_next):
+    from sqlmodel import select
+    from backend.auth import COOKIE_NAME, resolve_session_user
+    from backend.db import get_session as _get_session
+    from backend.models import User
+
+    path = request.url.path
     # ingest has its own API key auth; the installer + collector download
-    # routes must be fetchable by a brand-new user who doesn't have the
-    # dashboard password yet — skip basic auth for all three.
-    if (
-        not _DASHBOARD_PASSWORD
-        or request.url.path.startswith("/api/v1/ingest")
-        or request.url.path in _PUBLIC_PATHS
-    ):
+    # routes, and the login page/endpoint, must be reachable with no
+    # password or session at all.
+    if path.startswith("/api/v1/ingest") or path in _PUBLIC_PATHS:
         return await call_next(request)
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Basic "):
-        try:
-            _, password = base64.b64decode(auth[6:]).decode().split(":", 1)
-            if password == _DASHBOARD_PASSWORD:
-                return await call_next(request)
-        except Exception:
-            pass
-    return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="ai-dash"'})
+
+    with next(_get_session()) as session:
+        any_user = session.exec(select(User.username).limit(1)).first() is not None
+
+        if not any_user:
+            # No accounts created yet — fall back to the shared-password
+            # Basic Auth gate (today's single-user-deploy behavior),
+            # byte-for-byte unchanged.
+            allowed = not _DASHBOARD_PASSWORD
+            if not allowed:
+                auth = request.headers.get("Authorization", "")
+                if auth.startswith("Basic "):
+                    try:
+                        _, password = base64.b64decode(auth[6:]).decode().split(":", 1)
+                        allowed = password == _DASHBOARD_PASSWORD
+                    except Exception:
+                        allowed = False
+        elif _is_static_frontend_asset(path):
+            # A logged-out browser needs to load its own compiled JS/CSS to even
+            # render /login — Basic Auth doesn't have this chicken-and-egg
+            # problem (the browser re-attaches cached credentials to every
+            # request on the origin), so this only applies once session-cookie
+            # auth (not Basic Auth) is the active mode.
+            allowed = True
+        else:
+            # At least one account exists — Basic Auth is retired from here
+            # on; only a valid session cookie gets through.
+            allowed = resolve_session_user(session, request.cookies.get(COOKIE_NAME)) is not None
+
+    # DB session is closed before any of these branches run — none of them
+    # need it, and call_next() can run an arbitrarily long downstream
+    # request, which must not hold this connection open the whole time.
+    if allowed:
+        return await call_next(request)
+    if not any_user:
+        return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="ai-dash"'})
+    if path.startswith("/api/"):
+        return Response(status_code=401, content="Unauthorized")
+    return RedirectResponse(url="/login", status_code=302)
 
 
 app.include_router(router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 
 @app.get("/collector.py")
@@ -127,7 +180,6 @@ def serve_install():
 # because those paths don't exist on disk). The catch-all below serves actual asset
 # files directly and falls back to index.html for everything else.
 if _FRONTEND.exists():
-    _FRONTEND_RESOLVED = _FRONTEND.resolve()
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
