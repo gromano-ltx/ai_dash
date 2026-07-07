@@ -37,6 +37,20 @@ def test_matches_gemini_tier():
     assert result.output_usd == 1.05
 
 
+def test_matches_openai_tier_for_a_different_model_version():
+    result = estimate_cost("openai", "gpt-6-codex-preview", 1_000_000, 1_000_000)
+    assert result is not None
+    assert result.input_usd == 1.25
+    assert result.output_usd == 10.00
+
+
+def test_matches_gemini_tier_for_a_different_model_version():
+    result = estimate_cost("gemini", "gemini-4.0-flash", 1_000_000, 1_000_000)
+    assert result is not None
+    assert result.input_usd == 0.35
+    assert result.output_usd == 1.05
+
+
 def test_matching_is_case_insensitive():
     result = estimate_cost("anthropic", "Claude-SONNET-4-5-20250929", 1_000_000, 1_000_000)
     assert result is not None

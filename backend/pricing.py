@@ -27,10 +27,10 @@ PRICING: dict[str, list[tuple[str, ModelPrice]]] = {
         ("haiku", ModelPrice(0.80, 4.00)),
     ],
     "openai": [
-        ("gpt-5-codex", ModelPrice(1.25, 10.00)),
+        ("codex", ModelPrice(1.25, 10.00)),
     ],
     "gemini": [
-        ("gemini-3.5-flash", ModelPrice(0.35, 1.05)),
+        ("flash", ModelPrice(0.35, 1.05)),
     ],
 }
 
