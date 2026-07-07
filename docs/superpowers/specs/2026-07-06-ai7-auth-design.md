@@ -1,10 +1,10 @@
-# AI-7: Auth — per-user login to replace shared dashboard password
+# AI-7: Auth (per-user login to replace shared dashboard password)
 
 ## Context
 
 Today the entire dashboard is gated by a single shared secret: `backend/main.py` runs an ASGI
 middleware that checks `DASHBOARD_PASSWORD` via HTTP Basic Auth (the username half of the
-Basic Auth pair is decoded but discarded — only the password is checked, with a plain `==`
+Basic Auth pair is decoded but discarded; only the password is checked, with a plain `==`
 compare). There's no login page; the browser's native Basic Auth prompt is the only "login UI".
 If `DASHBOARD_PASSWORD` is unset, auth is disabled entirely (today's local single-user dev mode).
 
@@ -12,11 +12,11 @@ There is no `users` table and no identity model anywhere in the schema. "User" i
 free-text string: `AgentRun.user` and `ApiKey.user` (`backend/models.py`) are just labels typed
 in when an API key is created in Settings. The sidebar's "user switcher"
 (`frontend/src/lib/UserContext.tsx` + `frontend/src/components/Layout.tsx`) is a client-side
-`localStorage`-backed filter with **no server-side enforcement** — any client can already view
+`localStorage`-backed filter with **no server-side enforcement**: any client can already view
 any user's runs by changing the dropdown or the `user` query param directly.
 
 This ticket replaces that shared password with real per-user accounts, session-based login, and
-(per clarification during design) introduces actual per-user data scoping — the first real
+(per clarification during design) introduces actual per-user data scoping: the first real
 access-control boundary this dashboard has had.
 
 ### DoD (from Linear AI-7)
@@ -37,10 +37,10 @@ called out explicitly rather than left implicit in the architecture below.
    because the current "switcher" behavior (anyone sees everyone's data) has no real access
    control today, and per-user login without scoping would be a fairly hollow "login" feature.
 2. **Identity linkage**: the new `users.username` is the *same free-text string* already used as
-   `AgentRun.user` / `ApiKey.user` — no new ID concept, no backfill migration. An admin must
+   `AgentRun.user` / `ApiKey.user`: no new ID concept, no backfill migration. An admin must
    create an account with the exact same spelling/casing already used for that user's API key.
 3. **Session mechanism**: signed `httponly` cookie (via `itsdangerous`), not JWT. No server-side
-   session store — the cookie is self-verifying (signature + embedded timestamp, 30-day max-age).
+   session store: the cookie is self-verifying (signature + embedded timestamp, 30-day max-age).
    Chosen because it doesn't require the frontend to wire an `Authorization` header into every
    TanStack Query fetch call, and it degrades similarly to today's cookie-free Basic Auth prompt.
 4. **Password fallback semantics**: `DASHBOARD_PASSWORD` Basic Auth only applies while the
@@ -64,7 +64,7 @@ called out explicitly rather than left implicit in the architecture below.
 ## Data model
 
 New table in `backend/models.py`, created automatically via the existing
-`SQLModel.metadata.create_all(engine)` in `init_db()` — no Alembic, no manual `ALTER TABLE`
+`SQLModel.metadata.create_all(engine)` in `init_db()`; no Alembic, no manual `ALTER TABLE`
 needed since this is a net-new table, not an added column on an existing one.
 
 ```python
@@ -76,22 +76,22 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 ```
 
-No email, reset tokens, or last-login tracking — none of that is in scope.
+No email, reset tokens, or last-login tracking; none of that is in scope.
 
 ## Auth flow / backend enforcement
 
 **New endpoints** (`backend/api/auth.py`, new file):
-- `POST /api/login` — `{username, password}` → looks up `User`, verifies with
+- `POST /api/login`: `{username, password}` → looks up `User`, verifies with
   `passlib.hash.bcrypt.verify()`. Success sets the session cookie described below. Failure →
   `401` with a generic "invalid username or password" (don't reveal which field was wrong).
-- `POST /api/logout` — clears the cookie.
-- `GET /api/me` — returns `{username, is_admin}` for the current session, or `401` if none.
+- `POST /api/logout`: clears the cookie.
+- `GET /api/me`: returns `{username, is_admin}` for the current session, or `401` if none.
   Used by the frontend to know who's logged in and to detect "logged out" state.
 
 **Session cookie**: `itsdangerous.URLSafeTimedSerializer`, keyed by a new `SESSION_SECRET` env
 var (separate secret from `DASHBOARD_PASSWORD`). Payload is `{"username": ...}`. Cookie flags:
 `httponly`, `secure`, `samesite=lax`. Verified with `max_age=30 days` per the DoD's expiry
-requirement — an expired or tampered cookie simply fails verification; there's no server-side
+requirement: an expired or tampered cookie simply fails verification; there's no server-side
 session table to separately expire or revoke, so revocation (e.g. deleting a user account) takes
 effect the next time that cookie is verified against a since-deleted `User` row.
 
@@ -108,7 +108,7 @@ three checks, evaluated in order:
 
 **Scoping enforcement**: a shared helper (e.g. `scope_to_user(query, user)` in
 `backend/api/routes.py`) applied to the run-listing endpoints (`/api/runs`, `/api/stats`,
-`/api/daily`, `/api/stream`, `/api/users`) — adds `.where(AgentRun.user == user.username)`
+`/api/daily`, `/api/stream`, `/api/users`); it adds `.where(AgentRun.user == user.username)`
 unless `user.is_admin`. Single-run detail (`/api/runs/:id`) applies the same check but returns
 `404` (not `403`) when a non-admin requests a run they don't own, to avoid confirming the run's
 existence to someone who shouldn't see it.
@@ -125,18 +125,18 @@ user with a username that already exists → `409`. Demoting or deleting the las
   `/api/login` with `credentials: 'include'`, redirects to `/` on success. Added as a top-level
   route in `App.tsx`, outside `<Layout>` (no sidebar/nav on the login screen).
 - **Session-aware layout**: `<Layout>` queries `GET /api/me` on mount. A `401` from `/api/me` (or
-  from any API call — add a shared TanStack Query error handler) redirects to `/login`. This
+  from any API call; add a shared TanStack Query error handler) redirects to `/login`. This
   replaces the browser's native Basic Auth prompt as the "you're logged out" signal.
 - **Remove the global user switcher**: `UserContext.tsx` and the sidebar `<select>` in
-  `Layout.tsx` are deleted. "Current user" is whatever `/api/me` returns — no client-side
+  `Layout.tsx` are deleted. "Current user" is whatever `/api/me` returns; no client-side
   override. `Dashboard.tsx` / `Runs.tsx` drop their `effectiveUser = user || globalUser` logic;
   backend scoping now does the filtering, so non-admin clients don't need to pass a `user` query
   param at all.
 - **Admin "view as" filter**: admins keep a `/runs` filter dropdown (populated from
-  `/api/users`), in the same UI slot the old switcher occupied — but now it's a filter over data
+  `/api/users`), in the same UI slot the old switcher occupied, but now it's a filter over data
   the admin can already see, not an identity switch. Non-admins don't see this control.
 - **Settings page** (`frontend/src/pages/Settings.tsx`): add a new "Users" section next to the
-  existing "API Keys" section — table of accounts (username, admin badge, created date) with
+  existing "API Keys" section: a table of accounts (username, admin badge, created date) with
   create/revoke/toggle-admin actions. Both the new "Users" section and the existing "API Keys"
   section are admin-only (hidden, and backend-enforced via `403`, for non-admins).
 - **Logout**: a button in the sidebar (replacing the old switcher's position), calling
@@ -144,7 +144,7 @@ user with a username that already exists → `409`. Demoting or deleting the las
 
 ## Migration & rollout
 
-- No data migration for existing `AgentRun` / `ApiKey` rows — they keep using their free-text
+- No data migration for existing `AgentRun` / `ApiKey` rows; they keep using their free-text
   `user` string as-is; matching `User` accounts are created after the fact.
 - New env var `SESSION_SECRET` needs to be added to Terraform (`infra/main.tf`, alongside the
   existing `DASHBOARD_PASSWORD` / `DATABASE_URL` secrets) and to local `.env.example`.
@@ -183,7 +183,7 @@ user with a username that already exists → `409`. Demoting or deleting the las
 - Password reset / forgot-password flow.
 - OAuth / SSO.
 - Server-side session revocation list (revocation works by deleting the `User` row, which the
-  session-cookie check picks up on next verification — not instant, bounded by normal request
+  session-cookie check picks up on next verification; not instant, bounded by normal request
   frequency, not a ticket requirement).
 - Any change to ingest (`POST /api/v1/ingest`) or `ApiKey` auth beyond restricting its
-  *management* UI to admins — the ingest auth mechanism itself is unchanged, per the DoD.
+  *management* UI to admins; the ingest auth mechanism itself is unchanged, per the DoD.

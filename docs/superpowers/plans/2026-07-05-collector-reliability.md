@@ -10,13 +10,13 @@
 
 ## Global Constraints
 
-- Dedicated venv for the collector's dependencies (`~/.ai_dash/venv`) — never installs into a shared/system Python environment. (Design: "Shared dependency environment" root cause.)
+- Dedicated venv for the collector's dependencies (`~/.ai_dash/venv`); it never installs into a shared/system Python environment. (Design: "Shared dependency environment" root cause.)
 - `state.json` writes must be atomic (temp file + `os.replace()`), never a partial/truncated write visible to a concurrent reader.
 - The async `watchfiles` path must fall back to the existing stdlib polling path (`_watch_poll`) if it fails **at runtime**, not just when the initial dependency check fails.
-- Collector logging must be bounded: `RotatingFileHandler` at `~/.ai_dash/collector.log`, `maxBytes=5*1024*1024` (5MB), `backupCount=3` — total cap ≈20MB regardless of uptime.
-- Service definitions (launchd plist / systemd unit) redirect stdout/stderr to `/dev/null` — the collector manages its own bounded log file directly, not the service supervisor.
+- Collector logging must be bounded: `RotatingFileHandler` at `~/.ai_dash/collector.log`, `maxBytes=5*1024*1024` (5MB), `backupCount=3`: total cap ≈20MB regardless of uptime.
+- Service definitions (launchd plist / systemd unit) redirect stdout/stderr to `/dev/null`; the collector manages its own bounded log file directly, not the service supervisor.
 - Installer must be idempotent: re-running it must not error, duplicate the service registration, or re-prompt for config that already exists.
-- v1 platform target is macOS (launchd) and Linux (systemd user services) only — no other OS/init system support.
+- v1 platform target is macOS (launchd) and Linux (systemd user services) only, with no other OS/init system support.
 
 ---
 
@@ -99,10 +99,10 @@ def test_save_state_overwrites_existing_content(tmp_path, monkeypatch):
 
 Run: `python3 -m pytest collector/test_collector.py -v` (from repo root)
 Expected: `test_save_state_uses_atomic_replace` FAILS with
-`assert 0 == 1` (or similar) — the current implementation calls
+`assert 0 == 1` (or similar): the current implementation calls
 `STATE_FILE.write_text(...)` directly and never calls `os.replace`, so
 `replace_calls` stays empty. The other three tests PASS already (the naive
-write also produces correct final content and no `.tmp` file) — they exist to
+write also produces correct final content and no `.tmp` file); they exist to
 lock in `save_state`'s observable behavior as a regression net, not to prove
 the safety property; the real crash-safety guarantee is exercised by the
 manual kill-test in Step 5.
@@ -127,14 +127,14 @@ def save_state(state: dict):
     os.replace(tmp_path, STATE_FILE)
 ```
 
-`os` is already imported at the top of `collector/collector.py` (line 17) — no new import needed.
+`os` is already imported at the top of `collector/collector.py` (line 17), so no new import is needed.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python3 -m pytest collector/test_collector.py -v`
 Expected: `4 passed`
 
-- [ ] **Step 5: Manual verification — survives a kill mid-write**
+- [ ] **Step 5: Manual verification (survives a kill mid-write)**
 
 This exercises the actual atomicity guarantee (`os.replace` is atomic at the
 filesystem level; a `.tmp` file killed mid-write never becomes the live
@@ -162,12 +162,12 @@ else:
     os.kill(pid, signal.SIGKILL)
     os.waitpid(pid, 0)
 PY
-python3 -c "import json; json.load(open('/tmp/ai_dash_atomic_test/state.json')); print('VALID JSON — atomic write held')"
+python3 -c "import json; json.load(open('/tmp/ai_dash_atomic_test/state.json')); print('VALID JSON, atomic write held')"
 rm -rf /tmp/ai_dash_atomic_test
 ```
 
-Expected output: `VALID JSON — atomic write held` (the killed child either never
-reached `os.replace` — leaving the seed content intact — or completed it fully;
+Expected output: `VALID JSON, atomic write held` (the killed child either never
+reached `os.replace`, leaving the seed content intact, or completed it fully;
 `state.json` is never left as half-written garbage).
 
 - [ ] **Step 6: Commit**
@@ -186,8 +186,8 @@ git commit -m "fix: make collector state.json writes atomic (AI-6)"
 - Modify: `collector/test_collector.py` (append tests)
 
 **Interfaces:**
-- Consumes: `save_state` from Task 1 (unchanged signature, already atomic — no interaction needed).
-- Produces: module-level `logger` (a `logging.Logger` named `"ai_dash.collector"`) and `_setup_logging(log_dir: Path = CONFIG_DIR, name: str = "ai_dash.collector") -> logging.Logger`. Task 3 (installer) relies on the log file living at `CONFIG_DIR / "collector.log"` (i.e. `~/.ai_dash/collector.log`) for its README/service documentation — no code dependency, just the fixed path.
+- Consumes: `save_state` from Task 1 (unchanged signature, already atomic; no interaction needed).
+- Produces: module-level `logger` (a `logging.Logger` named `"ai_dash.collector"`) and `_setup_logging(log_dir: Path = CONFIG_DIR, name: str = "ai_dash.collector") -> logging.Logger`. Task 3 (installer) relies on the log file living at `CONFIG_DIR / "collector.log"` (i.e. `~/.ai_dash/collector.log`) for its README/service documentation; no code dependency, just the fixed path.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -227,7 +227,7 @@ def test_watch_falls_back_to_polling_on_awatch_runtime_failure(
 
     async def fake_awatch(path):
         raise RuntimeError("_rust_notify broken")
-        yield  # pragma: no cover — makes this an async generator function
+        yield  # pragma: no cover: makes this an async generator function
 
     monkeypatch.setattr(watchfiles, "awatch", fake_awatch)
 
@@ -293,7 +293,7 @@ logger = _setup_logging()
 ```
 
 Now replace every `print(...)` call in the file with the equivalent `logger` call.
-Messages keep their existing text (minus the leading `"[ai-dash] "` — the log
+Messages keep their existing text (minus the leading `"[ai-dash] "`, since the log
 formatter's timestamp prefix makes it redundant); anything currently printed with
 `file=sys.stderr` becomes `logger.error` (or `logger.warning` for the two
 "not found, will watch once it appears" messages, which aren't fatal), everything
@@ -311,8 +311,8 @@ else becomes `logger.info`. Apply these exact replacements:
 | `_ship_urllib` | `print(f"[ai-dash] server lost session for {path.name}, re-sending from offset 0")` | `logger.info(f"server lost session for {path.name}, re-sending from offset 0")` |
 | `_ship_urllib` | `print(f"[ai-dash] server error {exc.code} for {path.name}", file=sys.stderr)` | `logger.error(f"server error {exc.code} for {path.name}")` |
 | `_ship_urllib` | `print(f"[ai-dash] failed to ship {path.name}: {exc}", file=sys.stderr)` | `logger.error(f"failed to ship {path.name}: {exc}")` |
-| `_sync_all_stdlib` | `print(f"[ai-dash] sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")` | `logger.info(f"sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")` |
-| `_watch_poll` | `print(f"[ai-dash] starting (polling every {interval}s) — syncing to {url}")` | `logger.info(f"starting (polling every {interval}s) — syncing to {url}")` |
+| `_sync_all_stdlib` | `print(f"[ai-dash] sync complete: {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")` | `logger.info(f"sync complete: {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")` |
+| `_watch_poll` | `print(f"[ai-dash] starting (polling every {interval}s), syncing to {url}")` | `logger.info(f"starting (polling every {interval}s), syncing to {url}")` |
 | `_watch_poll` | `print(f"[ai-dash] {TRANSCRIPTS_BASE} not found, will watch once it appears", file=sys.stderr)` | `logger.warning(f"{TRANSCRIPTS_BASE} not found, will watch once it appears")` |
 | `_watch_poll` | `print(f"[ai-dash] watching {TRANSCRIPTS_BASE}")` | `logger.info(f"watching {TRANSCRIPTS_BASE}")` |
 | `_watch_poll` | `print(f"[ai-dash] poll error: {exc}", file=sys.stderr)` | `logger.error(f"poll error: {exc}")` |
@@ -321,8 +321,8 @@ else becomes `logger.info`. Apply these exact replacements:
 | `ship` (async) | `print(f"[ai-dash] server lost session for {path.name}, re-sending from offset 0")` | `logger.info(f"server lost session for {path.name}, re-sending from offset 0")` |
 | `ship` (async) | `print(f"[ai-dash] server error {resp.status_code} for {path.name}", file=sys.stderr)` | `logger.error(f"server error {resp.status_code} for {path.name}")` |
 | `ship` (async) | `print(f"[ai-dash] failed to ship {path.name}: {exc}", file=sys.stderr)` | `logger.error(f"failed to ship {path.name}: {exc}")` |
-| `sync_all` | `print(f"[ai-dash] sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")` | `logger.info(f"sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")` |
-| `watch` | `print(f"[ai-dash] starting — syncing existing transcripts to {url}")` | `logger.info(f"starting — syncing existing transcripts to {url}")` |
+| `sync_all` | `print(f"[ai-dash] sync complete: {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")` | `logger.info(f"sync complete: {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")` |
+| `watch` | `print(f"[ai-dash] starting: syncing existing transcripts to {url}")` | `logger.info(f"starting: syncing existing transcripts to {url}")` |
 | `watch` | `print(f"[ai-dash] {TRANSCRIPTS_BASE} not found, will watch once it appears", file=sys.stderr)` | `logger.warning(f"{TRANSCRIPTS_BASE} not found, will watch once it appears")` |
 | `watch` | `print(f"[ai-dash] watching {TRANSCRIPTS_BASE}")` | `logger.info(f"watching {TRANSCRIPTS_BASE}")` |
 | `main` | `print("[ai-dash] Config missing 'url' or 'key'.", file=sys.stderr)` | `logger.error("Config missing 'url' or 'key'.")` |
@@ -339,7 +339,7 @@ async def watch(url: str, key: str):
 
     state = load_state()
     async with httpx.AsyncClient() as client:
-        logger.info(f"starting — syncing existing transcripts to {url}")
+        logger.info(f"starting: syncing existing transcripts to {url}")
         state = await sync_all(url, key, state, client)
         save_state(state)
 
@@ -378,7 +378,7 @@ if it fails before the fallback point is even reached).
 Run: `python3 -m pytest collector/test_collector.py -v`
 Expected: `6 passed`
 
-- [ ] **Step 6: Manual verification — bounded log growth**
+- [ ] **Step 6: Manual verification (bounded log growth)**
 
 ```bash
 python3 - <<'PY'
@@ -398,7 +398,7 @@ rm -rf /tmp/ai_dash_log_test
 ```
 
 Expected: `ls` shows `collector.log`, `collector.log.1`, `collector.log.2`,
-`collector.log.3` (4 files, capped — no `collector.log.4`), and `du -sh` reports
+`collector.log.3` (4 files, capped; no `collector.log.4`), and `du -sh` reports
 a total around 20MB, not the ~20MB-per-file/unbounded growth the old plain-file
 approach would have produced for 20,000 × 1000-byte lines (~20MB of raw input,
 confirming rotation kicked in rather than growing past the 4-file cap).
@@ -415,12 +415,12 @@ git commit -m "feat: bounded rotating logs + graceful watchfiles fallback in col
 ### Task 3: One-liner installer script + README update
 
 **Files:**
-- Create: `install.sh` (repo root — already served at `GET /install.sh` by `backend/main.py:111-113`, which reads `_ROOT / "install.sh"` where `_ROOT` is the repo root)
+- Create: `install.sh` (repo root; already served at `GET /install.sh` by `backend/main.py:111-113`, which reads `_ROOT / "install.sh"` where `_ROOT` is the repo root)
 - Modify: `README.md:83` (Collector setup section)
 
 **Interfaces:**
-- Consumes: the log file path (`~/.ai_dash/collector.log`) and rotation policy (5MB × 3 backups) established in Task 2, for the README's description. `GET /collector.py` (already implemented, `backend/main.py:106-108`) as the download source. No new backend interfaces are needed — both routes already exist.
-- Produces: nothing consumed by other tasks — this is the final task in the plan.
+- Consumes: the log file path (`~/.ai_dash/collector.log`) and rotation policy (5MB × 3 backups) established in Task 2, for the README's description. `GET /collector.py` (already implemented, `backend/main.py:106-108`) as the download source. No new backend interfaces are needed: both routes already exist.
+- Produces: nothing consumed by other tasks; this is the final task in the plan.
 
 - [ ] **Step 1: Write `install.sh`**
 
@@ -439,7 +439,7 @@ CONFIG_FILE="$AI_DASH_DIR/config.json"
 echo "[ai-dash] installing to $AI_DASH_DIR"
 mkdir -p "$AI_DASH_DIR"
 
-# 1. Dedicated venv — isolated from any other project's Python environment,
+# 1. Dedicated venv, isolated from any other project's Python environment,
 #    so an unrelated `pip install` elsewhere can never break the collector's deps.
 if [ ! -d "$VENV_DIR" ]; then
   echo "[ai-dash] creating dedicated virtualenv at $VENV_DIR"
@@ -454,7 +454,7 @@ fi
 echo "[ai-dash] downloading collector.py from $AI_DASH_URL"
 curl -fsSL "$AI_DASH_URL/collector.py" -o "$COLLECTOR_PY"
 
-# 3. Config — prompt only if missing, so re-running is idempotent
+# 3. Config: prompt only if missing, so re-running is idempotent
 if [ ! -f "$CONFIG_FILE" ]; then
   read -rp "ai-dash API key: " AI_DASH_KEY
   cat > "$CONFIG_FILE" <<EOF
@@ -517,7 +517,7 @@ EOF
   systemctl --user enable --now ai-dash-collector.service
   echo "[ai-dash] systemd service installed and started"
 else
-  echo "[ai-dash] unsupported OS '$OS_NAME' — run manually: $VENV_DIR/bin/python $COLLECTOR_PY" >&2
+  echo "[ai-dash] unsupported OS '$OS_NAME'; run manually: $VENV_DIR/bin/python $COLLECTOR_PY" >&2
   exit 1
 fi
 
@@ -536,13 +536,13 @@ chmod +x install.sh
 Replace `README.md:83`:
 
 ```markdown
-**Run as a background service** — see `install.sh` for launchd (macOS) / systemd (Linux) setup.
+**Run as a background service**: see `install.sh` for launchd (macOS) / systemd (Linux) setup.
 ```
 
 with:
 
 ```markdown
-**Run as a background service (recommended)** — the installer creates a dedicated virtualenv
+**Run as a background service (recommended)**: the installer creates a dedicated virtualenv
 (isolated from any other Python project on your machine), downloads the collector, and registers
 it as a launchd (macOS) / systemd (Linux) service that restarts automatically and logs to
 `~/.ai_dash/collector.log` (rotated at 5MB × 3 backups, ~20MB max):
@@ -551,11 +551,11 @@ it as a launchd (macOS) / systemd (Linux) service that restarts automatically an
 curl -fsSL https://dash.ai-coordinator.io/install.sh | bash
 ```
 
-Re-running the command is safe — it reuses the existing virtualenv and config, and just refreshes
+Re-running the command is safe: it reuses the existing virtualenv and config, and just refreshes
 the collector code and service definition.
 ```
 
-- [ ] **Step 3: Manual verification — idempotent install on this machine**
+- [ ] **Step 3: Manual verification (idempotent install on this machine)**
 
 ```bash
 cd /Users/gromano/repos/ai_dash
@@ -570,7 +570,7 @@ kill $HTTP_PID
 rm -f /tmp/ai_dash_install_test_collector.py
 ```
 
-Expected: `download OK` — confirms the `GET /collector.py`-style download step
+Expected: `download OK`, confirming the `GET /collector.py`-style download step
 fetches real content (this stands in for the full curl-from-production flow,
 which the plan doesn't run against the live server to avoid registering a real
 collector instance for a test run).
@@ -589,7 +589,7 @@ launchctl list | grep ai-dash
 ```
 
 Note: the systemd (Linux) branch cannot be manually verified on this machine
-(macOS) — it's covered by code review of the script only, not a live run. Flag
+(macOS); it's covered by code review of the script only, not a live run. Flag
 this to the user rather than claiming Linux was tested.
 
 - [ ] **Step 4: Commit**

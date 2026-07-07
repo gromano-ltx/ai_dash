@@ -11,16 +11,16 @@
 ## Global Constraints
 
 - Every Codex CLI session is labeled `provider="openai"` regardless of which backend model it
-  actually used — no per-session provider detection.
-- Codex's `token_count` events are cumulative running totals — take the **last** non-null event's
+  actually used; no per-session provider detection.
+- Codex's `token_count` events are cumulative running totals: take the **last** non-null event's
   values directly; never sum across events (unlike Claude Code's per-message deltas, which are
   summed).
 - Provider dispatch uses an explicit `X-Provider` header set by the collector; defaults to
   `"anthropic"` server-side when the header is absent, for backward compatibility with
   not-yet-upgraded collector installs.
-- `backend/watcher.py`'s local-only watch loop stays Claude-Code-only — out of scope.
+- `backend/watcher.py`'s local-only watch loop stays Claude-Code-only, and is out of scope.
 - Shared regex/extraction helpers live in `backend/adapters/_common.py`, imported by both
-  adapters — not duplicated.
+  adapters, not duplicated.
 
 ---
 
@@ -109,7 +109,7 @@ def test_get_user_returns_a_non_empty_string():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest backend/adapters/test_common.py -v` (from repo root)
-Expected: `ModuleNotFoundError: No module named 'backend.adapters._common'` (collection error —
+Expected: `ModuleNotFoundError: No module named 'backend.adapters._common'` (collection error:
 the module doesn't exist yet).
 
 - [ ] **Step 3: Create `backend/adapters/_common.py`**
@@ -123,7 +123,7 @@ from datetime import datetime
 TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d+)\b|#(\d+)\b')
 # Common technical abbreviations that match the ticket-key shape
 # ([A-Z]{2,10}-\d+) but are never real ticket prefixes, e.g. "UTF-8",
-# "SHA-256", "ISO-8601" — these show up constantly in commit messages
+# "SHA-256", "ISO-8601": these show up constantly in commit messages
 # and code discussion and would otherwise render as bogus ticket refs.
 _NON_TICKET_PREFIXES = frozenset({
     "UTF", "SHA", "HTTP", "HTTPS", "ISO", "RFC", "MD", "CRC", "JSON", "XML",
@@ -195,7 +195,7 @@ from backend.models import AgentRun
 TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d+)\b|#(\d+)\b')
 # Common technical abbreviations that match the ticket-key shape
 # ([A-Z]{2,10}-\d+) but are never real ticket prefixes, e.g. "UTF-8",
-# "SHA-256", "ISO-8601" — these show up constantly in commit messages
+# "SHA-256", "ISO-8601": these show up constantly in commit messages
 # and code discussion and would otherwise render as bogus ticket refs.
 _NON_TICKET_PREFIXES = frozenset({
     "UTF", "SHA", "HTTP", "HTTPS", "ISO", "RFC", "MD", "CRC", "JSON", "XML",
@@ -236,16 +236,16 @@ from backend.adapters._common import (
 )
 ```
 
-`re`, `os`, and `subprocess` are no longer used anywhere in this file after this change — they
+`re`, `os`, and `subprocess` are no longer used anywhere in this file after this change; they
 were only needed for the regex definitions and the two functions (`_extract_tickets`, `_get_user`)
-being removed below. **`datetime` must be kept** — confirmed via
+being removed below. **`datetime` must be kept**, confirmed via
 `grep -n "datetime\." backend/adapters/claude_code.py`: `parse_transcript_content` itself still
 calls `datetime.utcnow()` directly at two points (the running/done status check, and the
-`started_at` fallback) — only `_parse_ts` (which also used `datetime`, moving to `_common.py`) is
+`started_at` fallback); only `_parse_ts` (which also used `datetime`, moving to `_common.py`) is
 being removed, not every use of `datetime` in the file.
 
 Now remove the three functions that moved to `_common.py`. Delete this block (originally at
-`backend/adapters/claude_code.py:205-235`, three lines above where `_get_user` used to start —
+`backend/adapters/claude_code.py:205-235`, three lines above where `_get_user` used to start;
 exact line numbers will have shifted after Step 4's edit above, so locate by content):
 
 ```python
@@ -290,13 +290,13 @@ def _get_user() -> str:
     return os.environ.get('USER', 'unknown')
 ```
 
-Leave `_extract_text` exactly where it is (it stays in `claude_code.py` — it hardcodes Claude
+Leave `_extract_text` exactly where it is (it stays in `claude_code.py`; it hardcodes Claude
 Code's specific `content` shape and isn't reusable as-is by Codex's differently-shaped content).
 
 After this edit, `backend/adapters/claude_code.py` still has exactly one `import re` need: check
-whether any remaining code in the file (outside what was just removed) uses `re.` directly — if
+whether any remaining code in the file (outside what was just removed) uses `re.` directly; if
 not, the `import re` at the top can be dropped too (already excluded from the Step 4 replacement
-above). Verify with `grep -n "re\.\|os\.\|subprocess\." backend/adapters/claude_code.py` — any
+above). Verify with `grep -n "re\.\|os\.\|subprocess\." backend/adapters/claude_code.py`: any
 remaining hits outside of variable names like `github_repo` (which merely contain the substring
 "re") indicate a real usage that must stay imported; `git config`/`subprocess.run` and `os.environ`
 were only used in the now-removed `_get_user`.
@@ -330,10 +330,10 @@ git commit -m "refactor: extract shared ticket/commit/PR extraction into backend
 - Consumes: `backend.adapters._common.{GIT_COMMIT_RE, GH_PR_RE, GIT_PUSH_RE, GIT_REMOTE_RE,
   COMMIT_HASH_RE, PR_URL_RE, GITHUB_REPO_RE, _extract_tickets, _parse_ts, _get_user}` from Task 1.
 - Produces: `parse_transcript_content(content: str, mtime: Optional[float] = None, parent_id:
-  Optional[str] = None, agent_id: Optional[str] = None) -> Optional[AgentRun]` — same signature
+  Optional[str] = None, agent_id: Optional[str] = None) -> Optional[AgentRun]`, the same signature
   shape as `claude_code.parse_transcript_content`. Task 3's dispatch registry calls this directly.
   (`parse_transcript`/`scan_all_transcripts`, which `claude_code.py` has for `watcher.py`'s
-  local-only scan loop, are intentionally NOT implemented here — nothing in this plan calls them,
+  local-only scan loop, are intentionally NOT implemented here: nothing in this plan calls them,
   since `watcher.py` stays Claude-Code-only per the Global Constraints.)
 
 - [ ] **Step 1: Write the failing tests**
@@ -492,7 +492,7 @@ def test_parse_transcript_content_uses_model_from_turn_context():
 
 def test_parse_transcript_content_uses_last_token_count_not_summed():
     run = parse_transcript_content(_sample_session())
-    # Last token_count event has input=3010/output=128 — must NOT be
+    # Last token_count event has input=3010/output=128: must NOT be
     # 1000+3010=4010 (summed); summing would wildly over-count since each
     # event already carries the whole-session-so-far cumulative total.
     assert run.input_tokens == 3010
@@ -762,7 +762,7 @@ git commit -m "feat: add Codex CLI transcript adapter, labeled provider=openai (
 - Consumes: `backend.adapters.claude_code.parse_transcript_content` (existing),
   `backend.adapters.codex.parse_transcript_content` (Task 2).
 - Produces: `backend.api.routes.PROVIDER_ADAPTERS: dict[str, Callable]` and
-  `backend.api.routes._select_parser(provider: str) -> Callable` — Task 4 (collector) doesn't
+  `backend.api.routes._select_parser(provider: str) -> Callable`. Task 4 (collector) doesn't
   import these directly (it just sends the `X-Provider` header), but this is the exact dispatch
   logic that header drives.
 
@@ -880,25 +880,25 @@ git commit -m "feat: dispatch /v1/ingest to the right adapter based on X-Provide
 ### Task 4: Collector multi-source support
 
 **Files:**
-- Modify: `collector/collector.py` (throughout — see steps below)
+- Modify: `collector/collector.py` (throughout; see steps below)
 - Modify: `collector/test_collector.py` (fix the one existing test that references the
   now-renamed `TRANSCRIPTS_BASE`, plus new tests)
 
 **Interfaces:**
 - Consumes: nothing from Tasks 1-3 directly (collector/ and backend/ are separate processes with
-  no import dependency) — but functionally depends on Task 3 already being deployed, since a
+  no import dependency), but functionally depends on Task 3 already being deployed, since a
   collector shipping `X-Provider: openai` against a backend that doesn't yet have the `"openai"`
   key in `PROVIDER_ADAPTERS` would have every Codex session mis-parsed by the Claude Code adapter
   and likely rejected with a 422. This is naturally satisfied as long as all four tasks merge and
   deploy together.
-- Produces: `SOURCES: dict[str, Path]`, `_provider_for_path(path: Path) -> str` — nothing later in
+- Produces: `SOURCES: dict[str, Path]`, `_provider_for_path(path: Path) -> str`; nothing later in
   this plan consumes these (this is the final task), but they're the collector's half of the
   contract Task 3 established.
 
 - [ ] **Step 1: Write the failing tests**
 
 Append to `collector/test_collector.py`. `asyncio` and `json` are already imported earlier in this
-file (from the AI-6 collector-reliability work) — no new imports needed for these tests.
+file (from the AI-6 collector-reliability work); no new imports needed for these tests.
 
 ```python
 def test_provider_for_path_resolves_correct_source(tmp_path, monkeypatch):
@@ -1116,7 +1116,7 @@ def _sync_all_stdlib(url: str, key: str, state: dict) -> dict:
 
     if total_raw:
         ratio = (1 - total_gz / total_raw) * 100
-        logger.info(f"sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
+        logger.info(f"sync complete: {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
     return state
 ```
 
@@ -1155,7 +1155,7 @@ def _sync_all_stdlib(url: str, key: str, state: dict) -> dict:
 
     if total_raw:
         ratio = (1 - total_gz / total_raw) * 100
-        logger.info(f"sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
+        logger.info(f"sync complete: {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
     return state
 ```
 
@@ -1166,7 +1166,7 @@ Replace:
 ```python
 def _watch_poll(url: str, key: str, interval: int = 10):
     state = load_state()
-    logger.info(f"starting (polling every {interval}s) — syncing to {url}")
+    logger.info(f"starting (polling every {interval}s), syncing to {url}")
     state = _sync_all_stdlib(url, key, state)
     save_state(state)
 
@@ -1181,7 +1181,7 @@ with:
 ```python
 def _watch_poll(url: str, key: str, interval: int = 10):
     state = load_state()
-    logger.info(f"starting (polling every {interval}s) — syncing to {url}")
+    logger.info(f"starting (polling every {interval}s), syncing to {url}")
     state = _sync_all_stdlib(url, key, state)
     save_state(state)
 
@@ -1280,7 +1280,7 @@ async def sync_all(url: str, key: str, state: dict, client) -> dict:
 
     if total_raw:
         ratio = (1 - total_gz / total_raw) * 100
-        logger.info(f"sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
+        logger.info(f"sync complete: {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
     return state
 ```
 
@@ -1313,7 +1313,7 @@ async def sync_all(url: str, key: str, state: dict, client) -> dict:
 
     if total_raw:
         ratio = (1 - total_gz / total_raw) * 100
-        logger.info(f"sync complete — {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
+        logger.info(f"sync complete: {total_raw:,}B raw → {total_gz:,}B gz ({ratio:.0f}% reduction)")
     return state
 ```
 
@@ -1328,7 +1328,7 @@ async def watch(url: str, key: str):
 
     state = load_state()
     async with httpx.AsyncClient() as client:
-        logger.info(f"starting — syncing existing transcripts to {url}")
+        logger.info(f"starting, syncing existing transcripts to {url}")
         state = await sync_all(url, key, state, client)
         save_state(state)
 
@@ -1367,7 +1367,7 @@ async def watch(url: str, key: str):
 
     state = load_state()
     async with httpx.AsyncClient() as client:
-        logger.info(f"starting — syncing existing transcripts to {url}")
+        logger.info(f"starting, syncing existing transcripts to {url}")
         state = await sync_all(url, key, state, client)
         save_state(state)
 
@@ -1405,7 +1405,7 @@ Run: `python3 -m pytest collector/test_collector.py -v`
 Expected: `11 passed` (6 existing + 5 new; the one existing fallback test still passes with its
 `SOURCES` monkeypatch fix from Step 1)
 
-- [ ] **Step 11: Manual verification — both sources watched on this real machine**
+- [ ] **Step 11: Manual verification (both sources watched on this real machine)**
 
 ```bash
 python3 -c "

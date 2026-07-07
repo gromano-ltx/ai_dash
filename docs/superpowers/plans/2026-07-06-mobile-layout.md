@@ -10,21 +10,21 @@
 
 ## Global Constraints
 
-- Breakpoint for the mobile nav switch: `md` (768px, Tailwind default) — copied verbatim from the spec.
-- No new dependencies (no Headless UI, Radix, or similar dialog library) — plain `useState` + Tailwind only.
+- Breakpoint for the mobile nav switch: `md` (768px, Tailwind default), copied verbatim from the spec.
+- No new dependencies (no Headless UI, Radix, or similar dialog library): plain `useState` + Tailwind only.
 - Desktop behavior at `md` and above must be visually unchanged from today.
-- No automated test suite exists for the frontend (no test files, no test script in `package.json`) — verification is `tsc -b` (typecheck) + `vite build`, both already run in CI, plus manual browser verification at the widths listed in each task.
+- No automated test suite exists for the frontend (no test files, no test script in `package.json`), so verification is `tsc -b` (typecheck) + `vite build`, both already run in CI, plus manual browser verification at the widths listed in each task.
 
 ---
 
-### Task 1: Layout.tsx — hamburger + slide-in drawer nav
+### Task 1: Layout.tsx: hamburger + slide-in drawer nav
 
 **Files:**
-- Modify: `frontend/src/components/Layout.tsx` (entire file — see below)
+- Modify: `frontend/src/components/Layout.tsx` (entire file, see below)
 
 **Interfaces:**
 - Consumes: nothing from other tasks.
-- Produces: nothing consumed by other tasks — Tasks 2 and 3 touch unrelated files.
+- Produces: nothing consumed by other tasks; Tasks 2 and 3 touch unrelated files.
 
 - [ ] **Step 1: Replace the entire contents of `frontend/src/components/Layout.tsx`**
 
@@ -153,11 +153,11 @@ git commit -m "feat: hamburger + slide-in drawer nav for mobile (AI-45)"
 
 ---
 
-### Task 2: Runs.tsx + Settings.tsx — horizontal-scroll tables
+### Task 2: Runs.tsx + Settings.tsx: horizontal-scroll tables
 
 **Files:**
-- Modify: `frontend/src/pages/Runs.tsx` (table wrapper only — two boundary edits)
-- Modify: `frontend/src/pages/Settings.tsx` (table wrapper only — two boundary edits)
+- Modify: `frontend/src/pages/Runs.tsx` (table wrapper only, two boundary edits)
+- Modify: `frontend/src/pages/Settings.tsx` (table wrapper only, two boundary edits)
 
 **Interfaces:**
 - Consumes: nothing from other tasks.
@@ -197,10 +197,10 @@ Replace it with:
       </div>
 ```
 
-Nothing between the `<thead>` and `</tbody>` needs to change — leave the interior of the table (all
+Nothing between the `<thead>` and `</tbody>` needs to change: leave the interior of the table (all
 column headers and row rendering) exactly as it is. The interior lines will be under-indented by two
 spaces relative to their new nesting depth; this is cosmetic only (JSX doesn't require consistent
-indentation to function) and does not need to be fixed — leave it as-is to keep this a minimal,
+indentation to function) and does not need to be fixed, so leave it as-is to keep this a minimal,
 surgical change.
 
 - [ ] **Step 2: Wrap the Settings API-keys table in a horizontal-scroll container**
@@ -239,7 +239,7 @@ Replace it with:
       </section>
 ```
 
-Same note as Step 1 — the interior (thead/tbody content) is unchanged; leave its indentation as-is.
+Same note as Step 1: the interior (thead/tbody content) is unchanged; leave its indentation as-is.
 
 - [ ] **Step 3: Typecheck**
 
@@ -252,7 +252,7 @@ Run: `cd frontend && npm run dev`, open the app, navigate to `/runs` and `/setti
 **375px width** confirm:
 
 - The Runs table's 9 columns (Task, Provider, Model, User, Status, Duration, Tokens, Ticket, Code)
-  do not squeeze illegibly — the table itself scrolls horizontally within its rounded container
+  do not squeeze illegibly: the table itself scrolls horizontally within its rounded container
   (drag/swipe to see columns off-screen), and clicking a visible row still navigates to
   `/runs/:id` (the click handler is on the `<tr>`, unaffected by the new wrapper).
 - The Settings API-keys table (Key Prefix, User, Created, delete button) similarly does not squeeze
@@ -271,7 +271,7 @@ git commit -m "feat: horizontal-scroll wrapper for Runs and Settings tables on m
 
 ---
 
-### Task 3: Dashboard.tsx — header row wrap fix
+### Task 3: Dashboard.tsx: header row wrap fix
 
 **Files:**
 - Modify: `frontend/src/pages/Dashboard.tsx:109`
@@ -295,7 +295,7 @@ Replace it with:
 ```
 
 This is the row containing the "Overview" title (left) and the 5 time-range buttons + "N active"
-badge (right) — `flex-wrap` lets the right-hand cluster wrap onto a second line instead of
+badge (right); `flex-wrap` lets the right-hand cluster wrap onto a second line instead of
 overflowing past the title, and `gap-y-2` adds vertical spacing between the two lines when wrapped.
 
 - [ ] **Step 2: Typecheck**
@@ -308,7 +308,7 @@ Expected: no errors.
 Run: `cd frontend && npm run dev`, open the app at `/` (Dashboard), and at **375px width** confirm:
 
 - The "Overview" title and the 5 time-range buttons (24h/7d/30d/90d/All) no longer overflow
-  horizontally — the buttons wrap onto a second line below the title if they don't fit on one line.
+  horizontally: the buttons wrap onto a second line below the title if they don't fit on one line.
 - If any runs are currently `running` (the "N active" badge), it wraps along with the buttons rather
   than being clipped off-screen.
 - At **768px and ~1280px width**, the row looks exactly as it did before this change (single line,
@@ -330,7 +330,7 @@ git commit -m "fix: wrap Dashboard header row on narrow screens (AI-45)"
 **Spec coverage:** Mobile nav pattern (hamburger + drawer, `md` breakpoint, no new dependency) →
 Task 1. Runs table horizontal scroll → Task 2 Step 1. Settings table horizontal scroll (spec's
 "any other wide tables") → Task 2 Step 2. Dashboard header wrap fix (found during design review,
-confirmed in scope) → Task 3. RunDetail.tsx — spec explicitly says no structural changes expected,
+confirmed in scope) → Task 3. RunDetail.tsx: spec explicitly says no structural changes expected,
 covered by manual verification only, no code task needed. Testing approach (manual, at 375/430/767/
 768/~1280px, `tsc -b` + `vite build` as the automated baseline) → each task's Step 2-3 (or 2-4 for
 Task 2). All spec sections have a corresponding task or explicit no-change rationale.
@@ -339,5 +339,5 @@ Task 2). All spec sections have a corresponding task or explicit no-change ratio
 expected results.
 
 **Type consistency:** `mobileNavOpen` (boolean state) and `setMobileNavOpen` are defined and used
-only within Task 1's single file — no other task references them. No shared types/interfaces span
+only within Task 1's single file; no other task references them. No shared types/interfaces span
 tasks, since all three tasks are independent, single-file, non-interacting UI tweaks.

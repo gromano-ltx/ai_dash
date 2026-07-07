@@ -10,20 +10,20 @@
 
 ## Global Constraints
 
-- Endpoint: `DELETE /api/runs`, body `{"ids": ["<run-id>", ...]}` — bulk, not single-id-per-call.
-- Gated by `require_admin` (from `backend/auth.py`, already imported in `backend/api/routes.py`) —
+- Endpoint: `DELETE /api/runs`, body `{"ids": ["<run-id>", ...]}`: bulk, not single-id-per-call.
+- Gated by `require_admin` (from `backend/auth.py`, already imported in `backend/api/routes.py`),
   identical auth behavior to `/api/accounts` DELETE/PATCH: 401 unauthenticated, 403 non-admin.
 - Cascade: deleting a run also deletes any `AgentRun` rows with `parent_id` equal to the deleted
-  run's id (one level only — subagents don't have their own subagents in this schema), plus the
+  run's id (one level only; subagents don't have their own subagents in this schema), plus the
   `TranscriptStore` row for every deleted `AgentRun.id` (requested id and any cascaded children's
-  ids) — confirmed `TranscriptStore.session_id` always equals `AgentRun.id` for all three provider
+  ids). Confirmed `TranscriptStore.session_id` always equals `AgentRun.id` for all three provider
   adapters.
 - Batch cap: reject (422) if `ids` has more than 100 entries. Fixed constant, not configurable.
-- Exact-id-only: no filter/date-range/provider-based deletion — every id is looked up individually.
+- Exact-id-only: no filter/date-range/provider-based deletion; every id is looked up individually.
 - Response: `{"deleted": [...ids actually removed, including cascaded children...], "not_found":
   [...requested ids that didn't exist...]}`.
 - Audit log line at `INFO` level recording the admin's username and the ids they deleted.
-- Hard delete, no soft-delete/undo, no persistent audit table, no frontend UI — matches the design
+- Hard delete, no soft-delete/undo, no persistent audit table, no frontend UI: matches the design
   spec's explicit out-of-scope list.
 
 ---
@@ -36,9 +36,9 @@
 - Test: `backend/api/test_run_delete.py` (new file)
 
 **Interfaces:**
-- Produces: `DELETE /api/runs` — no other task in this plan consumes it (this is the only task).
+- Produces: `DELETE /api/runs`; no other task in this plan consumes it (this is the only task).
   Reuses `backend.auth.require_admin`, `backend.models.{AgentRun, TranscriptStore, User}`, and
-  `backend.db.get_session` exactly as already imported in `backend/api/routes.py` — no new
+  `backend.db.get_session` exactly as already imported in `backend/api/routes.py`, with no new
   cross-file dependencies.
 
 - [ ] **Step 1: Write the failing tests**
@@ -123,7 +123,7 @@ def test_delete_runs_rejects_batch_over_cap(test_client):
 
     assert res.status_code == 422
     with Session(db_module.engine) as session:
-        # Nothing deleted — the cap check must happen before any deletion.
+        # Nothing deleted: the cap check must happen before any deletion.
         assert session.get(AgentRun, "run1") is not None
 
 
@@ -169,7 +169,7 @@ def test_delete_runs_logs_admin_username_and_ids(test_client, caplog):
 
 Run: `.venv/bin/python -m pytest backend/api/test_run_delete.py -v` (from repo root)
 Expected: every test fails with `404 Not Found` (the route doesn't exist yet) or a collection error
-— confirms there's no accidental pre-existing route with this path.
+to confirm there's no accidental pre-existing route with this path.
 
 - [ ] **Step 3: Add the logger and batch-size constant**
 
@@ -304,7 +304,7 @@ task; no gaps.
 with expected output.
 
 **Type consistency:** `_delete_run_and_transcript(session: Session, run: AgentRun) -> None` is
-defined once and used identically for both the requested run and its cascaded children — no
+defined once and used identically for both the requested run and its cascaded children, with no
 duplicate/divergent deletion logic. The route's dependencies (`current: User = Depends(require_admin)`,
 `session: Session = Depends(get_session)`) match the exact parameter names and types already used by
 every other admin-gated route in this file (`list_keys`, `create_key`, `delete_key`).
