@@ -59,7 +59,7 @@ cd frontend && npm install && npm run dev
 ```
 
 Without the `docker compose up -d` + `.env` step, the backend falls back to a local
-`sqlite:///./ai_dash.db` file — fine for a quick look, but it can drift from Postgres-only
+`sqlite:///./ai_dash.db` file, which is fine for a quick look, but it can drift from Postgres-only
 behavior, so prefer the Postgres setup above for anything beyond a quick check.
 
 Frontend: http://localhost:5173  
@@ -81,10 +81,10 @@ This creates a dedicated virtualenv (isolated from any other Python project on y
 downloads the collector, prompts for your API key on first run only, and registers it as a
 launchd (macOS) / systemd (Linux) service that restarts automatically and logs to
 `~/.ai_dash/collector.log` (rotated at 5MB × 3 backups, ~20MB max). Re-running the command is
-safe — it reuses the existing virtualenv and config, and just refreshes the collector code and
+safe: it reuses the existing virtualenv and config, and just refreshes the collector code and
 service definition.
 
-**Manual run** (advanced — foreground only, no background service). Requires creating the config
+**Manual run** (advanced: foreground only, no background service). Requires creating the config
 file yourself first, since this path has no interactive prompt:
 ```bash
 mkdir -p ~/.ai_dash && cat > ~/.ai_dash/config.json <<'EOF'
@@ -105,7 +105,7 @@ project_id         = "devops-ai-tools"
 region             = "us-central1"
 db_password        = "..."
 dashboard_password = "..."
-session_secret     = "..."  # signs per-user login session cookies — pick a long random value
+session_secret     = "..."  # signs per-user login session cookies; pick a long random value
 ```
 
 ```bash
@@ -128,12 +128,12 @@ docker buildx build --platform linux/amd64 \
 
 New deployments start password-protected: the dashboard is gated by HTTP Basic Auth, using the
 `DASHBOARD_PASSWORD` env var (stored in GCP Secret Manager, set via `terraform.tfvars`). Username
-is ignored — only the password is checked.
+is ignored; only the password is checked.
 
 As soon as the first user account is created (Settings → Users), Basic Auth is retired for that
 deployment and only per-user login (`/login`, session cookie signed with `SESSION_SECRET`, 30-day
 expiry) works from then on. This is a one-way cutover: anyone who created that first account will
-need to log in with it explicitly — their browser's cached Basic Auth credentials stop working on
+need to log in with it explicitly; their browser's cached Basic Auth credentials stop working on
 the very next request.
 
 Non-admin users only see their own runs. Admins see everyone's runs and can create/revoke

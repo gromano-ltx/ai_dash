@@ -4,36 +4,36 @@
 
 **Goal:** Ingest real Gemini CLI coding-agent sessions into the dashboard, labeled `provider="gemini"`, by adding a new adapter and one new source/dispatch entry to the pipeline AI-46 already generalized.
 
-**Architecture:** A new `backend/adapters/gemini_cli.py` parses Gemini CLI's hybrid checkpoint/event JSONL format into the shared `AgentRun` shape, reusing `backend/adapters/_common.py`'s regex/extraction helpers unchanged. `backend/api/routes.py` gets one new `PROVIDER_ADAPTERS` entry plus a new `X-Parent-Id` header read-through. `collector/collector.py` gets one new `SOURCES` entry plus a small path-based helper that detects Gemini's subagent-transcript path convention and ships the parent id as that new header — necessary because, unlike Claude Code, Gemini subagent transcript *content* never records its own parent session id, and the backend's `/v1/ingest` endpoint never sees the original file path (only content + a few headers).
+**Architecture:** A new `backend/adapters/gemini_cli.py` parses Gemini CLI's hybrid checkpoint/event JSONL format into the shared `AgentRun` shape, reusing `backend/adapters/_common.py`'s regex/extraction helpers unchanged. `backend/api/routes.py` gets one new `PROVIDER_ADAPTERS` entry plus a new `X-Parent-Id` header read-through. `collector/collector.py` gets one new `SOURCES` entry plus a small path-based helper that detects Gemini's subagent-transcript path convention and ships the parent id as that new header, necessary because, unlike Claude Code, Gemini subagent transcript *content* never records its own parent session id, and the backend's `/v1/ingest` endpoint never sees the original file path (only content + a few headers).
 
 **Tech Stack:** Python 3.12, FastAPI, SQLModel, pytest, watchfiles/httpx (collector).
 
 ## Global Constraints
 
-- Target is Gemini CLI specifically (confirmed installed, v0.49.0) — not Antigravity (a separate
+- Target is Gemini CLI specifically (confirmed installed, v0.49.0), not Antigravity (a separate
   Google agentic-IDE product also rooted under `~/.gemini/`), which is out of scope for this ticket.
 - Token mapping: sum `tokens.input` across deduped `"gemini"`-type events → `input_tokens`; sum
   `(tokens.output + tokens.thoughts + tokens.tool)` → `output_tokens`. Verified against real local
   data that `total = input + output + thoughts + tool` and `cached` is a subset of `input`, not
   additive.
 - Real sessions on this machine log the same message `id` twice in a row (a debounced-write
-  artifact of the checkpoint format) — dedupe by `id` before accumulating tokens/text/tool calls.
-- `meta.git_branch` and `meta.cwd` are always `None` for this adapter — no equivalent field exists
+  artifact of the checkpoint format); dedupe by `id` before accumulating tokens/text/tool calls.
+- `meta.git_branch` and `meta.cwd` are always `None` for this adapter: no equivalent field exists
   in Gemini CLI transcript content, and (per a planning-time decision, see Task 2) the backend never
-  receives the original file path needed to read a sibling `.project_root` file. Known, accepted gap
-  — neither field is in this ticket's DoD.
+  receives the original file path needed to read a sibling `.project_root` file. Known, accepted gap;
+  neither field is in this ticket's DoD.
 - Subagent parent linkage requires a new `X-Parent-Id` header, populated by the collector (which has
-  path access) and read by the backend (which doesn't) — this is an addition beyond what
+  path access) and read by the backend (which doesn't): this is an addition beyond what
   `docs/superpowers/specs/2026-07-06-gemini-cli-adapter-design.md` originally described, discovered
   while writing this plan: that spec assumed a path-aware `parse_transcript(path)` wrapper would run
-  in production, but `/v1/ingest` only ever calls `parse_transcript_content(content, mtime=...)` —
+  in production, but `/v1/ingest` only ever calls `parse_transcript_content(content, mtime=...)`;
   the file path is never available backend-side.
-- No filename filtering needed in the collector — `SOURCES["gemini"] = Path.home() / ".gemini" /
+- No filename filtering needed in the collector: `SOURCES["gemini"] = Path.home() / ".gemini" /
   "tmp"` works with the existing `base.rglob("*.jsonl")` walk; verified all 16 `.jsonl` files under
   `~/.gemini/tmp` on this machine live under a `chats/` directory.
-- Shared regex/extraction helpers already live in `backend/adapters/_common.py` (added in AI-46) —
+- Shared regex/extraction helpers already live in `backend/adapters/_common.py` (added in AI-46),
   reused as-is, not duplicated.
-- `backend/watcher.py`'s local-only watch loop stays Claude-Code-only — out of scope.
+- `backend/watcher.py`'s local-only watch loop stays Claude-Code-only, out of scope.
 
 ---
 
@@ -47,11 +47,11 @@
 - Consumes: `backend.adapters._common.{_classify_shell_command, _resolve_command_output,
   _extract_tickets, _parse_ts, _get_user}` (existing, from AI-46).
 - Produces: `parse_transcript_content(content: str, mtime: Optional[float] = None, parent_id:
-  Optional[str] = None, agent_id: Optional[str] = None) -> Optional[AgentRun]` — identical
+  Optional[str] = None, agent_id: Optional[str] = None) -> Optional[AgentRun]`, identical
   signature shape to `claude_code.py`/`codex.py`. Task 2's `PROVIDER_ADAPTERS` registry calls this
   directly. (`parse_transcript`/`scan_all_transcripts`, which `claude_code.py` has for
   `watcher.py`'s local-only scan loop, are intentionally NOT implemented here, matching `codex.py`'s
-  precedent — nothing in this plan calls them.)
+  precedent; nothing in this plan calls them.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -78,7 +78,7 @@ def _sample_session() -> str:
     summary/memoryScratchpad line) carry no "messages" key and are ignored.
     """
     lines = [
-        # Header line — no "type" key, no "$set" key.
+        # Header line: no "type" key, no "$set" key.
         _line({
             "sessionId": "06ba9b64-5701-4a4e-b7eb-4bac2b449d5c",
             "projectHash": "7caa8e06c56b60fb427b988dd636bd970a01de49287b4b5f3231498ba62d6096",
@@ -86,7 +86,7 @@ def _sample_session() -> str:
             "lastUpdated": "2026-06-29T13:49:00.000Z",
             "kind": "main",
         }),
-        # First real message, wrapped in the initial $set checkpoint — injected
+        # First real message, wrapped in the initial $set checkpoint: injected
         # <session_context> text that must be skipped for label/task purposes.
         _line({
             "$set": {
@@ -99,9 +99,9 @@ def _sample_session() -> str:
                 "lastUpdated": "2026-06-29T13:49:00.100Z",
             },
         }),
-        # Housekeeping $set line with no "messages" key — must be ignored, not crash.
+        # Housekeeping $set line with no "messages" key; must be ignored, not crash.
         _line({"$set": {"lastUpdated": "2026-06-29T13:49:00.200Z"}}),
-        # An "info" event — must be ignored for content extraction, but its
+        # An "info" event: must be ignored for content extraction, but its
         # timestamp still counts toward the session's last-seen timestamp.
         _line({
             "id": "info-1",
@@ -116,7 +116,7 @@ def _sample_session() -> str:
             "type": "user",
             "content": [{"text": "Fix the AI-47 ingestion bug please"}],
         }),
-        # First "gemini" turn, with a shell tool call that commits — command
+        # First "gemini" turn, with a shell tool call that commits; command
         # and result live together in the same object (no cross-event pairing
         # needed, unlike Claude Code/Codex).
         _line({
@@ -140,7 +140,7 @@ def _sample_session() -> str:
                 "status": "success",
             }],
         }),
-        # Duplicate of the exact same "gemini" event (same id) — a verified
+        # Duplicate of the exact same "gemini" event (same id): a verified
         # real debounced-write artifact. Must not be double-counted.
         _line({
             "id": "gemini-1",
@@ -210,7 +210,7 @@ def test_parse_transcript_content_uses_model_from_gemini_event():
 
 def test_parse_transcript_content_sums_input_tokens_across_turns():
     run = parse_transcript_content(_sample_session())
-    # 100 (turn 1, deduped) + 150 (turn 2) = 250 — NOT 100+100+150=350, which
+    # 100 (turn 1, deduped) + 150 (turn 2) = 250, NOT 100+100+150=350, which
     # would double-count the verified real duplicate-line case.
     assert run.input_tokens == 250
 
@@ -271,7 +271,7 @@ def test_parse_transcript_content_status_running_when_mtime_is_recent():
 
 def test_parse_transcript_content_ignores_info_events_but_counts_their_timestamp():
     # The "info" event's timestamp (13:49:00.300Z) is earlier than the last
-    # "gemini" event (13:49:10.000Z), so it shouldn't change ended_at here —
+    # "gemini" event (13:49:10.000Z), so it shouldn't change ended_at here;
     # this just confirms parsing an "info" event doesn't crash or corrupt
     # first_user_text/tokens.
     run = parse_transcript_content(_sample_session(), mtime=0.0)
@@ -336,7 +336,7 @@ def parse_transcript_content(
     if not lines:
         return None
 
-    # Line 0 is always the header (sessionId/startTime/kind) — it has neither
+    # Line 0 is always the header (sessionId/startTime/kind): it has neither
     # a "$set" nor a top-level "type" key, so it's naturally excluded from the
     # flattened event list built below.
     header = lines[0]
@@ -371,7 +371,7 @@ def parse_transcript_content(
     output_tokens = 0
 
     # Real sessions on this machine log the same message id twice in a row (a
-    # debounced-write artifact of the checkpoint format) — dedupe before
+    # debounced-write artifact of the checkpoint format); dedupe before
     # accumulating anything.
     seen_ids: set[str] = set()
 
@@ -417,7 +417,7 @@ def parse_transcript_content(
                     continue
                 bash_commands.append(cmd)
                 # Unlike Claude Code/Codex, a Gemini toolCalls entry already
-                # carries both the command and its result together — classify
+                # carries both the command and its result together: classify
                 # then immediately resolve in the same pass, no cross-event
                 # pending-id tracking required.
                 _classify_shell_command(
@@ -494,7 +494,7 @@ git commit -m "feat: add Gemini CLI transcript adapter, labeled provider=gemini 
 - Consumes: `backend.adapters.gemini_cli.parse_transcript_content` (Task 1).
 - Produces: `PROVIDER_ADAPTERS["gemini"]` entry; `ingest_transcript` now reads a new
   `x_parent_id: Optional[str] = Header(None)` and passes it as `parent_id=` into whichever adapter
-  `_select_parser` returns — this is the first time any provider's `parent_id` parameter is actually
+  `_select_parser` returns. This is the first time any provider's `parent_id` parameter is actually
   populated via the network ingest path (previously always `None`, since only the local-only
   `parse_transcript(path)` wrapper used it). Task 3 (collector) is the producer of this header's
   value.
@@ -515,7 +515,7 @@ def test_select_parser_dispatches_gemini():
     assert _select_parser("gemini") is gemini_cli.parse_transcript_content
 ```
 
-Also update the existing rejection test — `"gemini"` is no longer an unknown provider once this
+Also update the existing rejection test: `"gemini"` is no longer an unknown provider once this
 task lands, so it must be removed from the "bad" list (otherwise this existing test would start
 failing once Step 3 below adds the real dispatch entry):
 
@@ -625,10 +625,10 @@ with:
 
 This is safe for the existing `anthropic`/`openai` providers too: both adapters already accept a
 `parent_id` keyword (previously always `None` via this path), and passing an explicit `None` when
-the header is absent — which is FastAPI's default whenever the collector doesn't send
-`X-Parent-Id` — behaves identically to today for Claude Code and Codex sessions. No endpoint-level
+the header is absent (which is FastAPI's default whenever the collector doesn't send
+`X-Parent-Id`) behaves identically to today for Claude Code and Codex sessions. No endpoint-level
 integration test exists for this yet (matches the existing scope of `test_routes.py`, which only
-unit-tests `_select_parser`, not the full endpoint via a `TestClient`) — `parent_id` passthrough is
+unit-tests `_select_parser`, not the full endpoint via a `TestClient`); `parent_id` passthrough is
 covered at the adapter level by Task 1's
 `test_parse_transcript_content_passes_through_parent_id`, and this one-line wiring change mirrors
 how `x_file_mtime` already flows through with no dedicated endpoint test either.
@@ -650,17 +650,17 @@ git commit -m "feat: dispatch /v1/ingest to the Gemini adapter and pass through 
 ### Task 3: Collector Gemini source + parent-id header
 
 **Files:**
-- Modify: `collector/collector.py` (throughout — see steps below)
+- Modify: `collector/collector.py` (throughout; see steps below)
 - Modify: `collector/test_collector.py` (fix one existing test's `fake_ship` signature, plus new
   tests)
 
 **Interfaces:**
 - Consumes: nothing from Tasks 1-2 directly (collector/ and backend/ are separate processes with no
-  import dependency) — but functionally depends on Task 2 already being deployed, since shipping
+  import dependency), but functionally depends on Task 2 already being deployed, since shipping
   `X-Provider: gemini` against a backend that doesn't yet have the `"gemini"` key in
   `PROVIDER_ADAPTERS` would get every Gemini session rejected with a 422. Naturally satisfied as
   long as all three tasks merge and deploy together.
-- Produces: `SOURCES["gemini"]`, `_parent_id_for_path(path: Path, provider: str) -> str | None` —
+- Produces: `SOURCES["gemini"]`, `_parent_id_for_path(path: Path, provider: str) -> str | None`;
   nothing later in this plan consumes these (this is the final task), but this is the collector's
   half of the `X-Parent-Id` contract Task 2 established.
 
@@ -681,7 +681,7 @@ def test_parent_id_for_path_returns_none_for_gemini_main_session(tmp_path):
 
 def test_parent_id_for_path_returns_none_for_non_gemini_provider(tmp_path):
     # Same subagent-shaped nesting, but this convention only applies to the
-    # "gemini" source — Claude Code/Codex paths never mean this.
+    # "gemini" source: Claude Code/Codex paths never mean this.
     path = tmp_path / "chats" / "06ba9b64-parent" / "9c128235-subagent.jsonl"
     assert collector_mod._parent_id_for_path(path, "openai") is None
 
@@ -750,7 +750,7 @@ def test_ship_urllib_omits_x_parent_id_header_when_none(tmp_path, monkeypatch):
 Also fix the existing `fake_ship` in `test_sync_all_dispatches_correct_provider_per_source` so it
 accepts the new trailing `parent_id` keyword `sync_all` now passes (this test's own directories are
 plain `anthropic`/`openai` dirs, not Gemini subagent paths, so `parent_id` will always resolve to
-`None` for it — but the fake must still accept the argument or `sync_all` will raise `TypeError`).
+`None` for it, but the fake must still accept the argument or `sync_all` will raise `TypeError`).
 Replace:
 
 ```python
@@ -816,12 +816,12 @@ def _provider_for_path(path: Path) -> str:
 
 
 def _parent_id_for_path(path: Path, provider: str) -> str | None:
-    """Gemini CLI subagent transcripts live at .../chats/<parent-id>/<subagent-id>.jsonl —
-    two directories under "chats" — vs. main sessions directly at
+    """Gemini CLI subagent transcripts live at .../chats/<parent-id>/<subagent-id>.jsonl,
+    two directories under "chats", vs. main sessions directly at
     .../chats/session-*.jsonl, one directory under "chats". The subagent's own
     transcript content never records its parent's session id anywhere (unlike
     Claude Code's agentId/sessionId fields), so this must be derived from the
-    path here, before the file is shipped — the backend never receives the
+    path here, before the file is shipped: the backend never receives the
     original file path.
     """
     if provider != "gemini":
@@ -1034,7 +1034,7 @@ with:
 Run: `python3 -m pytest collector/test_collector.py -v`
 Expected: all tests pass (13 existing + 5 new).
 
-- [ ] **Step 10: Manual verification — the Gemini source is watched on this real machine**
+- [ ] **Step 10: Manual verification: the Gemini source is watched on this real machine**
 
 ```bash
 python3 -c "
@@ -1073,7 +1073,7 @@ python3 -m collector.collector
 ```
 
 Let it run long enough to complete an initial sync pass (logs to `~/.ai_dash/collector.log` and
-stdout), then stop it (Ctrl-C) — a one-shot sync of existing sessions is enough for verification, no
+stdout), then stop it (Ctrl-C); a one-shot sync of existing sessions is enough for verification, no
 need to leave it running.
 
 - [ ] **Step 3: Confirm at least one Gemini session was ingested**
@@ -1084,7 +1084,7 @@ curl -s "$(python3 -c "import json;print(json.load(open('$HOME/.ai_dash/config.j
 ```
 
 Expected: at least one run with `"provider": "gemini"`, non-zero `input_tokens`/`output_tokens`, and
-(if the machine has a Gemini CLI session that spawned a subagent — several exist locally, e.g. the
+(if the machine has a Gemini CLI session that spawned a subagent; several exist locally, e.g. the
 `code-review`/`superpowers` skill-invocation sessions) a `parent_id` pointing at another real
 `gemini`-provider run's `id`, confirming the `X-Parent-Id` header round-tripped correctly end to
 end.
@@ -1116,6 +1116,6 @@ parent_id: Optional[str] = None, agent_id: Optional[str] = None) -> Optional[Age
 `ingest_transcript`'s `parse_fn(content, mtime=x_file_mtime, parent_id=x_parent_id)` call work
 identically across all three adapters. `_ship_urllib`/`ship`'s new `parent_id: str | None = None`
 parameter is appended as a trailing keyword-defaulted parameter in both (after `mtime`), preserving
-every existing positional call site untouched except where Task 3 explicitly adds the new keyword —
+every existing positional call site untouched except where Task 3 explicitly adds the new keyword;
 confirmed against the one existing test that constructs its own `fake_ship` stand-in, which is
 updated in the same task to accept the new parameter.

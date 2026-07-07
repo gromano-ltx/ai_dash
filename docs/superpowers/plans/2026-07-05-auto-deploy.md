@@ -10,11 +10,11 @@
 
 ## Global Constraints
 
-- WIF provider must be scoped to exactly `repo:gromano-ltx/ai_dash` on `ref:refs/heads/main` — no other repo or branch may mint a usable token.
+- WIF provider must be scoped to exactly `repo:gromano-ltx/ai_dash` on `ref:refs/heads/main`: no other repo or branch may mint a usable token.
 - No long-lived GCP credential is ever stored in GitHub (this is the entire point of using WIF over a service account key).
-- `cloudbuild.yaml` is reused unchanged — do not duplicate its build steps in the workflow.
-- Deploy gate is a basic build/compile check only (no test suite exists yet — AI-17 is separate).
-- Fully automatic — no manual approval step before deploy.
+- `cloudbuild.yaml` is reused unchanged: do not duplicate its build steps in the workflow.
+- Deploy gate is a basic build/compile check only (no test suite exists yet; AI-17 is separate).
+- Fully automatic: no manual approval step before deploy.
 - `runs-on: ubuntu-slim` for both jobs (GA GitHub-hosted runner, Python/Node/gcloud pre-installed).
 - Full design context: `docs/superpowers/specs/2026-07-05-auto-deploy-design.md`.
 
@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Produces: Terraform resources `google_iam_workload_identity_pool.github`,
-  `google_iam_workload_identity_pool_provider.github`, `google_service_account.github_deployer` —
+  `google_iam_workload_identity_pool_provider.github`, `google_service_account.github_deployer`;
   their attributes (`.name`, `.email`) are consumed by Task 2's `terraform output` commands.
 
 - [ ] **Step 1: Append the WIF pool, provider, service account, and IAM bindings to `infra/main.tf`**
@@ -106,7 +106,7 @@ Expected: `Success! The configuration is valid.`
 - [ ] **Step 4: Plan the changes (no apply)**
 
 Run: `cd infra && terraform plan`
-Expected: Plan shows `4 to add` (pool, provider, service account, project IAM member) and `1 to add` for the service account IAM member — 5 resources to add total, 0 to change, 0 to destroy. No existing resources should show as changed or destroyed. If anything shows as destroyed, stop and re-check Step 1 before proceeding.
+Expected: Plan shows `4 to add` (pool, provider, service account, project IAM member) and `1 to add` for the service account IAM member (5 resources to add total, 0 to change, 0 to destroy). No existing resources should show as changed or destroyed. If anything shows as destroyed, stop and re-check Step 1 before proceeding.
 
 - [ ] **Step 5: Commit**
 
@@ -126,8 +126,8 @@ go-ahead before running `terraform apply`**, even though Task 1 already validate
 
 **Interfaces:**
 - Consumes: the Terraform resources from Task 1.
-- Produces: two string values — `workload_identity_provider` and `github_deployer_service_account`
-  — that Task 3 substitutes verbatim into the workflow YAML.
+- Produces: two string values, `workload_identity_provider` and `github_deployer_service_account`,
+  that Task 3 substitutes verbatim into the workflow YAML.
 
 - [ ] **Step 1: Get explicit user confirmation**
 
@@ -136,7 +136,7 @@ Ask the user directly: "About to run `terraform apply` in `infra/`, which will c
 - [ ] **Step 2: Apply**
 
 Run: `cd infra && terraform apply`
-Expected: prompts `Do you want to perform these actions?` — type `yes`. Ends with `Apply complete! Resources: 5 added, 0 changed, 0 destroyed.`
+Expected: prompts `Do you want to perform these actions?`; type `yes`. Ends with `Apply complete! Resources: 5 added, 0 changed, 0 destroyed.`
 
 - [ ] **Step 3: Capture the two output values**
 
@@ -146,7 +146,7 @@ Expected: a string like `projects/123456789/locations/global/workloadIdentityPoo
 Run: `cd infra && terraform output -raw github_deployer_service_account`
 Expected: a string like `github-deployer@devops-ai-tools.iam.gserviceaccount.com`
 
-Write both values down exactly — Task 3 needs them verbatim.
+Write both values down exactly: Task 3 needs them verbatim.
 
 - [ ] **Step 4: No commit needed**
 
@@ -257,4 +257,4 @@ Expected: a new revision name (higher number than whatever was live before Task 
 Run: `gcloud run services logs read ai-dash --region us-central1 --limit=30 | grep -iE "error|traceback"`
 Expected: no output (no errors).
 
-No commit for this task — it's pure verification of Tasks 1-3's already-committed work.
+No commit for this task: it's pure verification of Tasks 1-3's already-committed work.

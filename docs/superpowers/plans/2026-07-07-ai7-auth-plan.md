@@ -6,26 +6,26 @@
 
 **Architecture:** A new `users` table (username = the same free-text string already used for `AgentRun.user`/`ApiKey.user`). Passwords hashed with `bcrypt`; sessions are signed `itsdangerous` cookies (no server-side session store). The existing Basic Auth middleware gains a second mode: while no `User` rows exist it behaves exactly as today; once the first account exists, Basic Auth is retired and only a valid session cookie gets through. Non-admin users' run/stats/daily queries are scoped to their own `user` string; admins see everything and can manage accounts and API keys from Settings.
 
-**Tech Stack:** FastAPI + SQLModel (existing), `bcrypt` + `itsdangerous` (new, minimal — see deviation note below), React 19 + TanStack Query (existing, no new frontend deps).
+**Tech Stack:** FastAPI + SQLModel (existing), `bcrypt` + `itsdangerous` (new, minimal; see the deviation note below), React 19 + TanStack Query (existing, no new frontend deps).
 
 **Source spec:** `docs/superpowers/specs/2026-07-06-ai7-auth-design.md`
 
 ## Global Constraints
 
-- No Alembic in this repo — schema changes happen via `SQLModel.metadata.create_all()` (new tables only; the `users` table is net-new, so no hand-rolled `ALTER TABLE` is needed).
-- **Deviation from the spec's wording:** the spec says "passlib[bcrypt]"; this plan uses the `bcrypt` package directly instead of `passlib`. Reason found during planning: `passlib` 1.7.4 (latest release) breaks on `bcrypt>=4.1` (a well-known upstream incompatibility — passlib probes `bcrypt.__about__.__version__`, which newer `bcrypt` removed). Using `bcrypt` directly avoids that landmine entirely and is one dependency instead of two. Still satisfies the spec's decision #7 (hand-rolled, small deps, bcrypt-based hashing).
-- Follow existing backend conventions: raw `dict` request bodies for POST endpoints (not Pydantic models — matches `create_key`), lazy `from backend.X import Y` imports *inside* functions for anything touching the DB engine at module scope (matches `_cleanup_stale_runs` in `main.py`) so tests can monkeypatch `backend.db.engine` after import, and `# noqa: E711`/`# noqa: E712` comments on `== None`/`== True` comparisons (matches existing style).
-- Cookie flags: `httponly=True`, `secure=True` (hardcoded — see Task 5 comment), `samesite="lax"`. No `credentials: 'include'` needed anywhere in the frontend fetch layer — the app is always same-origin (production: frontend served from the same Cloud Run instance; local dev: Vite's `/api` proxy in `vite.config.ts` makes it same-origin from the browser's perspective too), so the browser sends cookies by default.
-- `SESSION_SECRET` env var defaults to a fixed dev string (`dev-insecure-secret-change-in-prod`) so `import backend.main` and local dev work with zero setup — mirrors how `DASHBOARD_PASSWORD` defaults to `""` (auth disabled). Production gets a real value via Terraform/Secret Manager (Task 9).
-- One-way cutover, by design (per spec decision #4): once the first `User` row exists, `DASHBOARD_PASSWORD` Basic Auth is retired for that deployment — including for whoever just created that first account. Their browser's cached Basic Auth credentials stop working on the very next request; they must go to `/login` and sign in with the new account. This is expected, not a bug — surfaced explicitly in the UI (Task 14).
-- The frontend has **no test runner** (no vitest/jest in `frontend/package.json`) and no existing frontend tests — this plan doesn't introduce one. Frontend task verification is manual: `npx tsc --noEmit` (typecheck, matches CI) + exercising the flow with the dev server running.
-- Backend tests run with `uv run pytest <path> -v`. CI (`.github/workflows/pr-checks.yml`) currently only runs `collector/test_collector.py` and a bare `import backend.main` check — it does not run `backend/**/test_*.py` today. That gap predates this ticket and is out of scope to fix here; new tests are still written and must pass locally.
+- No Alembic in this repo: schema changes happen via `SQLModel.metadata.create_all()` (new tables only; the `users` table is net-new, so no hand-rolled `ALTER TABLE` is needed).
+- **Deviation from the spec's wording:** the spec says "passlib[bcrypt]"; this plan uses the `bcrypt` package directly instead of `passlib`. Reason found during planning: `passlib` 1.7.4 (latest release) breaks on `bcrypt>=4.1` (a well-known upstream incompatibility: passlib probes `bcrypt.__about__.__version__`, which newer `bcrypt` removed). Using `bcrypt` directly avoids that landmine entirely and is one dependency instead of two. Still satisfies the spec's decision #7 (hand-rolled, small deps, bcrypt-based hashing).
+- Follow existing backend conventions: raw `dict` request bodies for POST endpoints (not Pydantic models, matching `create_key`), lazy `from backend.X import Y` imports *inside* functions for anything touching the DB engine at module scope (matches `_cleanup_stale_runs` in `main.py`) so tests can monkeypatch `backend.db.engine` after import, and `# noqa: E711`/`# noqa: E712` comments on `== None`/`== True` comparisons (matches existing style).
+- Cookie flags: `httponly=True`, `secure=True` (hardcoded; see Task 5 comment), `samesite="lax"`. No `credentials: 'include'` needed anywhere in the frontend fetch layer: the app is always same-origin (production: frontend served from the same Cloud Run instance; local dev: Vite's `/api` proxy in `vite.config.ts` makes it same-origin from the browser's perspective too), so the browser sends cookies by default.
+- `SESSION_SECRET` env var defaults to a fixed dev string (`dev-insecure-secret-change-in-prod`) so `import backend.main` and local dev work with zero setup, mirroring how `DASHBOARD_PASSWORD` defaults to `""` (auth disabled). Production gets a real value via Terraform/Secret Manager (Task 9).
+- One-way cutover, by design (per spec decision #4): once the first `User` row exists, `DASHBOARD_PASSWORD` Basic Auth is retired for that deployment, including for whoever just created that first account. Their browser's cached Basic Auth credentials stop working on the very next request; they must go to `/login` and sign in with the new account. This is expected, not a bug: it's surfaced explicitly in the UI (Task 14).
+- The frontend has **no test runner** (no vitest/jest in `frontend/package.json`) and no existing frontend tests; this plan doesn't introduce one. Frontend task verification is manual: `npx tsc --noEmit` (typecheck, matches CI) + exercising the flow with the dev server running.
+- Backend tests run with `uv run pytest <path> -v`. CI (`.github/workflows/pr-checks.yml`) currently only runs `collector/test_collector.py` and a bare `import backend.main` check; it does not run `backend/**/test_*.py` today. That gap predates this ticket and is out of scope to fix here; new tests are still written and must pass locally.
 
 ---
 
 ### Task 1: Backend test infrastructure
 
-Nothing today wires up an in-memory test database + `TestClient` — existing backend tests are pure unit tests with no DB. Every later backend task needs this fixture.
+Nothing today wires up an in-memory test database + `TestClient`: existing backend tests are pure unit tests with no DB. Every later backend task needs this fixture.
 
 **Files:**
 - Create: `backend/conftest.py`
@@ -66,7 +66,7 @@ def test_client(monkeypatch):
 def test_fixture_serves_existing_providers_endpoint(test_client, monkeypatch):
     import backend.main as main_module
 
-    # Force auth off regardless of the developer's shell environment —
+    # Force auth off regardless of the developer's shell environment;
     # this test only exists to prove the DB-engine monkeypatch and app
     # lifespan wiring work, before any auth code exists.
     monkeypatch.setattr(main_module, "_DASHBOARD_PASSWORD", "")
@@ -124,7 +124,7 @@ git commit -m "build: add bcrypt and itsdangerous for per-user auth"
 - Test: `backend/test_models.py`
 
 **Interfaces:**
-- Produces: `backend.models.User` — `SQLModel` table with `username: str` (primary key), `password_hash: str`, `is_admin: bool = False`, `created_at: datetime`.
+- Produces: `backend.models.User`, a `SQLModel` table with `username: str` (primary key), `password_hash: str`, `is_admin: bool = False`, `created_at: datetime`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -151,7 +151,7 @@ def test_user_round_trips_through_db(test_client):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest backend/test_models.py -v`
-Expected: FAIL — `ImportError: cannot import name 'User' from 'backend.models'`
+Expected: FAIL (`ImportError: cannot import name 'User' from 'backend.models'`)
 
 - [ ] **Step 3: Add the model**
 
@@ -180,7 +180,7 @@ git commit -m "feat(AI-7): add User model"
 
 ---
 
-### Task 4: `backend/auth.py` — password hashing, session tokens, auth dependencies
+### Task 4: `backend/auth.py` (password hashing, session tokens, auth dependencies)
 
 **Files:**
 - Create: `backend/auth.py`
@@ -262,7 +262,7 @@ def test_resolve_session_user_returns_user_for_valid_token(test_client):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest backend/test_auth.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'backend.auth'`
+Expected: FAIL (`ModuleNotFoundError: No module named 'backend.auth'`)
 
 - [ ] **Step 3: Write `backend/auth.py`**
 
@@ -282,7 +282,7 @@ COOKIE_NAME = "ai_dash_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30  # 30 days, per AI-7's DoD
 
 # Falls back to a fixed dev value so `import backend.main` and local dev
-# work with zero setup — same pattern as DASHBOARD_PASSWORD defaulting to
+# work with zero setup, the same pattern as DASHBOARD_PASSWORD defaulting to
 # "" (auth disabled) in main.py. Production sets a real SESSION_SECRET via
 # Terraform/Secret Manager (see infra/main.tf).
 SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-insecure-secret-change-in-prod")
@@ -349,7 +349,7 @@ git commit -m "feat(AI-7): add password hashing, session tokens, and auth depend
 
 ---
 
-### Task 5: `backend/api/auth_routes.py` — login, logout, me, account management
+### Task 5: `backend/api/auth_routes.py` (login, logout, me, account management)
 
 **Files:**
 - Create: `backend/api/auth_routes.py`
@@ -360,7 +360,7 @@ git commit -m "feat(AI-7): add password hashing, session tokens, and auth depend
 - Consumes: `backend.auth.{COOKIE_NAME, SESSION_MAX_AGE_SECONDS, create_session_token, hash_password, verify_password, require_user, require_admin, resolve_session_user}` (Task 4), `backend.models.User` (Task 3), `backend.db.get_session` (existing).
 - Produces: `POST /api/login`, `POST /api/logout`, `GET /api/me`, `POST /api/accounts`, `GET /api/accounts`, `DELETE /api/accounts/{username}`, `PATCH /api/accounts/{username}`.
 
-**Important design note on `/api/me`:** it must succeed (not 401) when no `User` rows exist yet — that's fallback/single-user-deploy mode, where there's no session concept at all, and the caller already passed Basic Auth to get this far (or Basic Auth is disabled entirely). In that mode it returns `{"username": null, "is_admin": false}`. Once at least one `User` exists, it requires a valid session cookie like every other protected route. Without this, `useMe()` on the frontend (Task 11) would 401 and bounce every fallback-mode deployment straight to `/login`, breaking today's "just works with a shared password" experience.
+**Important design note on `/api/me`:** it must succeed (not 401) when no `User` rows exist yet: that's fallback/single-user-deploy mode, where there's no session concept at all, and the caller already passed Basic Auth to get this far (or Basic Auth is disabled entirely). In that mode it returns `{"username": null, "is_admin": false}`. Once at least one `User` exists, it requires a valid session cookie like every other protected route. Without this, `useMe()` on the frontend (Task 11) would 401 and bounce every fallback-mode deployment straight to `/login`, breaking today's "just works with a shared password" experience.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -437,7 +437,7 @@ def test_bootstrap_creates_first_account_as_admin_with_no_auth(test_client):
 
 def test_create_account_after_bootstrap_requires_admin(test_client):
     test_client.post("/api/accounts", json={"username": "gabby", "password": "hunter2"})
-    # No session cookie attached — a second creation attempt must be rejected.
+    # No session cookie attached; a second creation attempt must be rejected.
     res = test_client.post("/api/accounts", json={"username": "bob", "password": "x"})
     assert res.status_code == 403
 
@@ -494,7 +494,7 @@ def test_delete_non_admin_account_succeeds(test_client):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest backend/api/test_auth_routes.py -v`
-Expected: FAIL — 404s, since none of these routes exist yet.
+Expected: FAIL, with 404s, since none of these routes exist yet.
 
 - [ ] **Step 3: Write `backend/api/auth_routes.py`**
 
@@ -553,7 +553,7 @@ def logout(response: Response):
 def me(request: Request, session: Session = Depends(get_session)):
     any_user = session.exec(select(User.username).limit(1)).first() is not None
     if not any_user:
-        # Fallback/single-user-deploy mode — no session concept applies.
+        # Fallback/single-user-deploy mode: no session concept applies.
         # Reaching this endpoint at all already means Basic Auth (if
         # configured) passed at the middleware layer.
         return {"username": None, "is_admin": False}
@@ -571,9 +571,9 @@ def _admin_count(session: Session) -> int:
 def create_account(body: dict, request: Request, session: Session = Depends(get_session)):
     existing = session.exec(select(User)).all()
     if existing:
-        # Not the bootstrap case — only an existing admin may create more
+        # Not the bootstrap case: only an existing admin may create more
         # accounts. Bootstrap (no accounts yet) has no admin to check
-        # against, so it's intentionally open here — in practice it's only
+        # against, so it's intentionally open here; in practice it's only
         # reachable while the dashboard is still gated by DASHBOARD_PASSWORD
         # Basic Auth at the middleware layer (Task 6).
         current = resolve_session_user(session, request.cookies.get(COOKIE_NAME))
@@ -762,11 +762,11 @@ def test_session_mode_ignores_dashboard_password_once_a_user_exists(test_client,
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest backend/test_middleware.py -v`
-Expected: FAIL — session-mode tests get `200`/no redirect instead of `401`/`302`, since the middleware doesn't know about `User` rows yet.
+Expected: FAIL: session-mode tests get `200`/no redirect instead of `401`/`302`, since the middleware doesn't know about `User` rows yet.
 
 - [ ] **Step 3: Rewrite the middleware**
 
-In `backend/main.py`, replace lines 6-8 (imports) — add `RedirectResponse`:
+In `backend/main.py`, replace lines 6-8 (imports), adding `RedirectResponse`:
 
 ```python
 from fastapi import FastAPI, Request, Response
@@ -798,7 +798,7 @@ async def auth_middleware(request: Request, call_next):
         any_user = session.exec(select(User.username).limit(1)).first() is not None
 
         if not any_user:
-            # No accounts created yet — fall back to the shared-password
+            # No accounts created yet: fall back to the shared-password
             # Basic Auth gate (today's single-user-deploy behavior),
             # byte-for-byte unchanged.
             if not _DASHBOARD_PASSWORD:
@@ -813,7 +813,7 @@ async def auth_middleware(request: Request, call_next):
                     pass
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="ai-dash"'})
 
-        # At least one account exists — Basic Auth is retired from here on;
+        # At least one account exists, so Basic Auth is retired from here on;
         # only a valid session cookie gets through.
         user = resolve_session_user(session, request.cookies.get(COOKIE_NAME))
 
@@ -939,7 +939,7 @@ def test_admin_can_manage_api_keys(test_client):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest backend/api/test_scoping.py -v`
-Expected: FAIL — non-admin currently sees both runs; `/api/keys` currently has no auth gate at all.
+Expected: FAIL: non-admin currently sees both runs; `/api/keys` currently has no auth gate at all.
 
 - [ ] **Step 3: Modify `backend/api/routes.py`**
 
@@ -961,7 +961,7 @@ def _visible_runs(session: Session, user: Optional[User] = None) -> list[AgentRu
     return runs
 ```
 
-Update `list_runs` (lines 52-88) — add the `current_user` dependency and scope the query:
+Update `list_runs` (lines 52-88): add the `current_user` dependency and scope the query:
 
 ```python
 @router.get("/runs", response_model=list[AgentRunRead])
@@ -988,7 +988,7 @@ def list_runs(
         query = query.where(AgentRun.user == user)
     if current_user and not current_user.is_admin:
         # Non-admins are always scoped to themselves, regardless of what
-        # `user` was requested — this is the security boundary, not just
+        # `user` was requested; this is the security boundary, not just
         # a default.
         query = query.where(AgentRun.user == current_user.username)
     if parent_id is not None:
@@ -1049,7 +1049,7 @@ def list_users(
     return {"users": sorted({r.user for r in runs if r.user})}
 ```
 
-Update `get_daily` (lines 111-137) — only the signature and the `_visible_runs` call change:
+Update `get_daily` (lines 111-137): only the signature and the `_visible_runs` call change:
 
 ```python
 @router.get("/daily")
@@ -1079,7 +1079,7 @@ def get_daily(
     return list(buckets.values())
 ```
 
-Update `get_stats` (lines 140-170) — same pattern:
+Update `get_stats` (lines 140-170), same pattern:
 
 ```python
 @router.get("/stats")
@@ -1170,14 +1170,14 @@ git commit -m "feat(AI-7): scope run data to the current user, admin-gate API ke
 
 ---
 
-### Task 8: Terraform — `SESSION_SECRET` secret, and README auth docs
+### Task 8: Terraform (`SESSION_SECRET` secret, and README auth docs)
 
 **Files:**
 - Modify: `infra/variables.tf`
 - Modify: `infra/main.tf:108-135` (secrets), `infra/main.tf:149-159` (IAM bindings), `infra/main.tf:203-224` (Cloud Run env vars)
 - Modify: `README.md:124-129`
 
-No automated test — this is infrastructure-as-code. Verification is `terraform validate`/`terraform plan`, not `terraform apply` (applying is a production change the user should run and review themselves).
+No automated test: this is infrastructure-as-code. Verification is `terraform validate`/`terraform plan`, not `terraform apply` (applying is a production change the user should run and review themselves).
 
 - [ ] **Step 1: Add the `session_secret` variable**
 
@@ -1247,12 +1247,12 @@ Replace the `## Auth` section (`README.md:124-129`) with:
 
 New deployments start password-protected: the dashboard is gated by HTTP Basic Auth, using the
 `DASHBOARD_PASSWORD` env var (stored in GCP Secret Manager, set via `terraform.tfvars`). Username
-is ignored — only the password is checked.
+is ignored; only the password is checked.
 
 As soon as the first user account is created (Settings → Users), Basic Auth is retired for that
 deployment and only per-user login (`/login`, session cookie signed with `SESSION_SECRET`, 30-day
 expiry) works from then on. This is a one-way cutover: anyone who created that first account will
-need to log in with it explicitly — their browser's cached Basic Auth credentials stop working on
+need to log in with it explicitly: their browser's cached Basic Auth credentials stop working on
 the very next request.
 
 Non-admin users only see their own runs. Admins see everyone's runs and can create/revoke
@@ -1267,7 +1267,7 @@ API ingest requires an `X-API-Key` header. Keys are seeded in the DB on first st
 Run: `cd infra && terraform validate`
 Expected: `Success! The configuration is valid.`
 
-Do **not** run `terraform apply` as part of this task — that provisions real GCP resources and secrets. Surface `terraform plan` output for the user to review, and let them apply it explicitly once they've set a real `session_secret` value in their `terraform.tfvars`.
+Do **not** run `terraform apply` as part of this task: that provisions real GCP resources and secrets. Surface `terraform plan` output for the user to review, and let them apply it explicitly once they've set a real `session_secret` value in their `terraform.tfvars`.
 
 - [ ] **Step 7: Commit**
 
@@ -1278,13 +1278,13 @@ git commit -m "infra(AI-7): add SESSION_SECRET for per-user login sessions"
 
 ---
 
-### Task 9: Frontend types — `Me`
+### Task 9: Frontend types (`Me`)
 
 **Files:**
 - Modify: `frontend/src/lib/types.ts`
 
 **Interfaces:**
-- Produces: `Me` interface — `{ username: string | null; is_admin: boolean }`.
+- Produces: `Me` interface: `{ username: string | null; is_admin: boolean }`.
 
 - [ ] **Step 1: Add the interface**
 
@@ -1311,7 +1311,7 @@ git commit -m "feat(AI-7): add Me type"
 
 ---
 
-### Task 10: `frontend/src/lib/api.ts` — session-aware fetch, `useMe`, `login`, `logout`
+### Task 10: `frontend/src/lib/api.ts` (session-aware fetch, `useMe`, `login`, `logout`)
 
 **Files:**
 - Modify: `frontend/src/lib/api.ts`
@@ -1488,14 +1488,14 @@ Change the `<Routes>` block (lines 17-24) to add the `/login` route outside `<La
       </Routes>
 ```
 
-Leave `<UserProvider>` in place for now — `Layout.tsx`, `Runs.tsx`, and `Dashboard.tsx` still depend on it until Tasks 12 and 13 remove those usages.
+Leave `<UserProvider>` in place for now: `Layout.tsx`, `Runs.tsx`, and `Dashboard.tsx` still depend on it until Tasks 12 and 13 remove those usages.
 
 - [ ] **Step 3: Typecheck and manually verify**
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: no errors.
 
-Manual verification: with both `uvicorn backend.main:app --reload` and `npm run dev` running, visit `http://localhost:5173/login` — the form renders. Submitting doesn't need to work yet (no accounts exist in a fresh DB, and this task doesn't touch that flow).
+Manual verification: with both `uvicorn backend.main:app --reload` and `npm run dev` running, visit `http://localhost:5173/login`: the form renders. Submitting doesn't need to work yet (no accounts exist in a fresh DB, and this task doesn't touch that flow).
 
 - [ ] **Step 4: Commit**
 
@@ -1506,7 +1506,7 @@ git commit -m "feat(AI-7): add /login page"
 
 ---
 
-### Task 12: `Layout.tsx` — remove the global user switcher, add identity + logout
+### Task 12: `Layout.tsx` (remove the global user switcher, add identity + logout)
 
 **Files:**
 - Modify: `frontend/src/components/Layout.tsx`
@@ -1607,11 +1607,11 @@ export function Layout() {
 - [ ] **Step 2: Typecheck**
 
 Run: `cd frontend && npx tsc --noEmit`
-Expected: no errors. (`Runs.tsx` and `Dashboard.tsx` still import `useActiveUser` from `UserContext.tsx`, which still exists and is still provided by `<UserProvider>` in `App.tsx` — this task doesn't touch either, so nothing breaks.)
+Expected: no errors. (`Runs.tsx` and `Dashboard.tsx` still import `useActiveUser` from `UserContext.tsx`, which still exists and is still provided by `<UserProvider>` in `App.tsx`; this task doesn't touch either, so nothing breaks.)
 
 - [ ] **Step 3: Manual verification**
 
-With a fresh local DB (delete `ai_dash.db` or use a clean Postgres) and no `DASHBOARD_PASSWORD` set, run the backend and frontend. Visit `http://localhost:5173/` — the sidebar no longer shows the "user:" dropdown. No username/logout row appears either (fallback mode, `me.username` is `null`).
+With a fresh local DB (delete `ai_dash.db` or use a clean Postgres) and no `DASHBOARD_PASSWORD` set, run the backend and frontend. Visit `http://localhost:5173/`: the sidebar no longer shows the "user:" dropdown. No username/logout row appears either (fallback mode, `me.username` is `null`).
 
 - [ ] **Step 4: Commit**
 
@@ -1622,7 +1622,7 @@ git commit -m "feat(AI-7): replace global user switcher with session identity + 
 
 ---
 
-### Task 13: `Settings.tsx` — Users (accounts) admin section, admin-gated API Keys section
+### Task 13: `Settings.tsx` (Users/accounts admin section, admin-gated API Keys section)
 
 **Files:**
 - Modify: `frontend/src/pages/Settings.tsx`
@@ -1744,7 +1744,7 @@ function UsersSection({ isBootstrap, isAdmin }: { isBootstrap: boolean; isAdmin:
       <section>
         <h2 className="text-xs text-slate-500 font-mono uppercase tracking-wider mb-3">Users</h2>
         <div className="bg-slate-800 border border-emerald-500/30 text-emerald-300 font-mono text-xs p-3 rounded">
-          Account created. The shared dashboard password no longer works — sign in with this
+          Account created. The shared dashboard password no longer works: sign in with this
           account to continue.
         </div>
         <button
@@ -2018,11 +2018,11 @@ Expected: no errors.
 - [ ] **Step 3: Manual verification (full bootstrap flow)**
 
 With a fresh local DB and `DASHBOARD_PASSWORD=testpass` set:
-1. Visit `http://localhost:5173/settings` — browser's native Basic Auth prompt appears (unchanged fallback behavior); authenticate with `testpass`.
+1. Visit `http://localhost:5173/settings`: browser's native Basic Auth prompt appears (unchanged fallback behavior); authenticate with `testpass`.
 2. The "Users" section shows a create form and no table (bootstrap mode). Create an account (e.g. `gabby` / `hunter2`). A message appears: "Account created… sign in with this account to continue," with a "Go to login" button.
-3. Click it — lands on `/login`. Sign in as `gabby`/`hunter2`.
-4. Redirected to `/`. Sidebar now shows `gabby` + `logout`. Visit `/settings` again — "Users" now shows a table with `gabby` marked `admin`, plus the "API Keys" section (visible because `gabby` is admin).
-5. Try deleting or demoting `gabby` from the table — both are blocked (last-admin guard), matching Task 5/7's backend tests.
+3. Click it: it lands on `/login`. Sign in as `gabby`/`hunter2`.
+4. Redirected to `/`. Sidebar now shows `gabby` + `logout`. Visit `/settings` again: "Users" now shows a table with `gabby` marked `admin`, plus the "API Keys" section (visible because `gabby` is admin).
+5. Try deleting or demoting `gabby` from the table: both are blocked (last-admin guard), matching Task 5/7's backend tests.
 
 - [ ] **Step 4: Commit**
 
@@ -2033,9 +2033,9 @@ git commit -m "feat(AI-7): add Users admin section, gate API Keys section on adm
 
 ---
 
-### Task 14: `Runs.tsx` + `Dashboard.tsx` — drop the global user context; admin "view as" filter
+### Task 14: `Runs.tsx` + `Dashboard.tsx` (drop the global user context; admin "view as" filter)
 
-This is the last consumer of `UserContext.tsx` — this task also removes `<UserProvider>` from `App.tsx` and deletes the file.
+This is the last consumer of `UserContext.tsx`; this task also removes `<UserProvider>` from `App.tsx` and deletes the file.
 
 **Files:**
 - Modify: `frontend/src/pages/Runs.tsx`
@@ -2083,7 +2083,7 @@ export function Runs() {
   }, [provider, status, user, ticket]);
 
   // No total-count endpoint exists, so infer "more pages" from a full page
-  // coming back — a short page means this was the last one.
+  // coming back; a short page means this was the last one.
   const hasNextPage = (runs?.length ?? 0) >= PAGE_SIZE;
 
   return (
@@ -2156,7 +2156,7 @@ export function Runs() {
                 </td>
                 <td className="px-4 py-3"><ProviderBadge provider={run.provider} /></td>
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{run.model}</td>
-                <td className="px-4 py-3 text-slate-400 font-mono text-xs">{run.user ?? "—"}</td>
+                <td className="px-4 py-3 text-slate-400 font-mono text-xs">{run.user ?? "-"}</td>
                 <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{duration(run.duration_seconds)}</td>
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs whitespace-nowrap">{fmt(run.input_tokens + run.output_tokens)}</td>
@@ -2172,7 +2172,7 @@ export function Runs() {
                               className="text-violet-400 hover:underline">{run.ticket_refs[0]}</a>
                           : <span className="text-violet-400">{run.ticket_refs[0]}</span>;
                       })()
-                    : <span className="text-slate-600">—</span>}
+                    : <span className="text-slate-600">-</span>}
                 </td>
                 <td className="px-4 py-3 text-xs font-mono">
                   {run.git_prs.length > 1
@@ -2204,7 +2204,7 @@ export function Runs() {
                               className="text-blue-400 hover:underline">{label}{extra}</a>
                           : <span className="text-slate-300">{label}{extra}</span>;
                       })()
-                    : <span className="text-slate-600">—</span>}
+                    : <span className="text-slate-600">-</span>}
                 </td>
               </tr>
             ))}
@@ -2323,7 +2323,7 @@ rm frontend/src/lib/UserContext.tsx
 - [ ] **Step 5: Typecheck**
 
 Run: `cd frontend && npx tsc --noEmit`
-Expected: no errors — this confirms no remaining file imports the deleted `UserContext.tsx`.
+Expected: no errors: this confirms no remaining file imports the deleted `UserContext.tsx`.
 
 - [ ] **Step 6: Full production build**
 
@@ -2352,7 +2352,7 @@ git commit -m "feat(AI-7): remove global user switcher, add admin view-as filter
 
 ## Post-plan verification
 
-- [ ] Run the full backend suite once more: `uv run pytest backend/ -v` — all tests pass.
-- [ ] Run `cd frontend && npx tsc --noEmit && npm run build` — both succeed.
-- [ ] Run `cd infra && terraform validate` — succeeds. Do not `terraform apply` without the user's explicit go-ahead (needs a real `session_secret` value in `terraform.tfvars`, and production Cloud Run env change).
+- [ ] Run the full backend suite once more: `uv run pytest backend/ -v`; all tests pass.
+- [ ] Run `cd frontend && npx tsc --noEmit && npm run build`; both succeed.
+- [ ] Run `cd infra && terraform validate`; it succeeds. Do not `terraform apply` without the user's explicit go-ahead (needs a real `session_secret` value in `terraform.tfvars`, and production Cloud Run env change).
 - [ ] Manually walk the full bootstrap → login → scoping → account management flow described in Tasks 13-14 against a fresh local DB.
