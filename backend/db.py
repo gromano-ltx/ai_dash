@@ -50,6 +50,44 @@ def _add_missing_columns():
         logger.info("[db] added agent_runs.updated_at column")
 
 
+def _backfill_cached_input_tokens(session: Session):
+    """One-time backfill: recompute input_tokens/meta.cached_input_tokens for
+    rows ingested before AI-54's fix, by re-parsing their stored transcript
+    content with the corrected adapter logic. Only these two fields are
+    touched — status/started_at/ended_at/label etc. on the existing row are
+    left exactly as they are; a fresh re-parse can't reliably reconstruct
+    those (e.g. it has no access to the original file's mtime), but
+    input_tokens/meta are fully and correctly derivable from the stored
+    transcript content alone. Gemini rows are skipped — no real ones existed
+    at the time of this fix, so nothing to backfill there.
+    """
+    from backend.adapters import claude_code, codex
+    from backend.models import AgentRun, TranscriptStore
+
+    parsers = {"openai": codex.parse_transcript_content, "anthropic": claude_code.parse_transcript_content}
+    rows = session.exec(
+        select(AgentRun).where(AgentRun.provider.in_(list(parsers.keys())))
+    ).all()
+    migrated = 0
+    for run in rows:
+        if isinstance(run.meta, dict) and "cached_input_tokens" in run.meta:
+            continue  # already migrated
+        stored = session.get(TranscriptStore, run.id)
+        if not stored:
+            continue
+        parse_fn = parsers[run.provider]
+        reparsed = parse_fn(stored.content)
+        if not reparsed:
+            continue
+        run.input_tokens = reparsed.input_tokens
+        run.meta = reparsed.meta
+        session.add(run)
+        migrated += 1
+    if migrated:
+        session.commit()
+        print(f"[db] backfilled cached_input_tokens for {migrated} runs")
+
+
 def get_session():
     with Session(engine) as session:
         yield session
@@ -149,3 +187,4 @@ def _seed():
                     session.add(r)
                 session.commit()
                 print(f"[db] backfilled ended_at for {len(stuck)} runs stuck done with null duration")
+            _backfill_cached_input_tokens(session)
