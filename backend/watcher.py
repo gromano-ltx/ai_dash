@@ -5,6 +5,7 @@ from backend.db import engine
 from backend.models import AgentRun
 from backend.adapters.claude_code import parse_transcript, scan_all_transcripts
 from backend import sse
+from backend.pricing import estimate_cost
 
 # Runs below this combined token count are treated as trivial/stub sessions
 # and are not persisted. Mirrors the threshold enforced in
@@ -39,6 +40,11 @@ def _upsert(run: AgentRun) -> bool:
     below MIN_TOKENS_TO_PERSIST, matching the ingest endpoint's behavior."""
     if run.input_tokens + run.output_tokens < MIN_TOKENS_TO_PERSIST:
         return False
+    cost = estimate_cost(run.provider, run.model, run.input_tokens, run.output_tokens)
+    if cost:
+        run.estimated_input_cost_usd = cost.input_usd
+        run.estimated_output_cost_usd = cost.output_usd
+        run.estimated_cost_usd = cost.total_usd
     with Session(engine) as session:
         existing = session.get(AgentRun, run.id)
         if existing:
