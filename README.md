@@ -13,16 +13,17 @@ Observability dashboard for AI coding agents. Tracks runs, token usage, commits,
         │
         │  collector daemon (watches + ships)
         ▼
-POST /api/v1/ingest
+POST /api/v1/ingest  (X-API-Key auth, unaffected by auth gate below)
         │
         ▼
   Cloud Run (FastAPI + React)
-        │
+        │  ── auth gate: DASHBOARD_PASSWORD Basic Auth (fallback)
+        │     or per-user session cookie (see Auth section) ──
         ▼
   Cloud SQL (Postgres)
 ```
 
-The **collector** runs locally, watches your Claude Code transcript files, and ships them to the central server. The server parses them into a unified `AgentRun` schema and serves the dashboard.
+The **collector** runs locally, watches your Claude Code transcript files, and ships them to the central server. The server parses them into a unified `AgentRun` schema and serves the dashboard, gated by per-user login (see [Auth](#auth)).
 
 ---
 
@@ -103,6 +104,7 @@ project_id         = "devops-ai-tools"
 region             = "us-central1"
 db_password        = "..."
 dashboard_password = "..."
+session_secret     = "..."  # signs per-user login session cookies — pick a long random value
 ```
 
 ```bash

@@ -33,6 +33,7 @@ Build a read-only observability dashboard for AI agents across three providers: 
   │          CENTRAL SERVER (Cloud Run, GCP)                    │
   │                                                             │
   │  POST /api/v1/ingest  ← collector ships JSONL               │
+  │  (own X-API-Key auth — unaffected by the auth gate below)   │
   │                            │                               │
   │                   parse_transcript()                        │
   │                            ▼                               │
@@ -44,17 +45,28 @@ Build a read-only observability dashboard for AI agents across three providers: 
   │                      │ Postgres │◄── Cloud SQL (GCP)       │
   │                      └──────────┘                          │
   │                                                             │
+  │  ── AUTH GATE (everything below) ───────────────────────    │
+  │  0 accounts exist → DASHBOARD_PASSWORD Basic Auth (fallback) │
+  │  ≥1 account exists → session cookie only (Basic Auth retired,│
+  │                       one-way cutover — see AI-7)            │
+  │  POST /login /logout   GET /me                               │
+  │  GET/POST/DELETE/PATCH /accounts  (admin-managed users)       │
+  │                            │                               │
   │  GET /api/runs  /api/stats  /api/daily  /api/providers      │
-  │  SSE /api/stream  (live push on new runs)                   │
+  │    (scoped: non-admin sees own runs only, admin sees all)    │
+  │  SSE /api/stream  (live push, same per-user scoping)          │
+  │  GET/POST/DELETE /keys  (API keys — admin-only)               │
   └──────────────────────────┬──────────────────────────────────┘
-                             │  REST + SSE
+                             │  REST + SSE (session cookie)
                              ▼
   ┌─────────────────────────────────────────────────────────────┐
   │        REACT FRONTEND (served from same Cloud Run)          │
   │                                                             │
+  │  /login         Login form → sets session cookie             │
   │  /              Overview — cards, charts, provider breakdown │
-  │  /runs          All runs table — filter by user/provider    │
+  │  /runs          All runs table — admin can filter by user   │
   │  /runs/:id      Run detail — timeline, trace tree, tokens   │
+  │  /settings      Users (accounts) + API keys (admin-only)     │
   └─────────────────────────────────────────────────────────────┘
 
   DNS: dash.ai-coordinator.io → Cloudflare Worker → Cloud Run URL
@@ -149,34 +161,51 @@ Claude Code streams events to the MCP server during each session. The MCP adapte
    - Extracts tool calls, token usage, git commits/PRs, ticket refs → `AgentRun`
    - Called by the ingest endpoint when collector ships a transcript
 
-2. **OpenAI proxy** (`backend/adapters/openai.py`) — **not yet built**
-   - Planned: transparent HTTPS proxy on `:8001`
+2. **OpenAI/Codex CLI adapter** (`backend/adapters/codex.py`) — **built**
+   - Parses Codex CLI JSONL transcripts into the same unified `AgentRun` shape
+   - Called by the ingest endpoint when `X-Provider: openai` is set
 
-3. **Gemini proxy** (`backend/adapters/gemini.py`) — **not yet built**
-   - Planned: transparent HTTPS proxy on `:8002`
+3. **Gemini CLI adapter** (`backend/adapters/gemini_cli.py`) — **built**
+   - Parses Gemini CLI transcripts into the same unified `AgentRun` shape
+   - Called by the ingest endpoint when `X-Provider: gemini` is set
 
-> **Out of scope for v1**: MCP server, OpenAI/Gemini proxies, desktop apps, mobile apps.
+> **Out of scope for v1**: MCP server, transparent proxy adapters, desktop apps, mobile apps.
 
 ---
 
 ## Backend Routes
 
 ```
-GET  /api/runs              # paginated list, filterable by provider/status/user/ticket/date
-GET  /api/runs/:id          # single run detail
-GET  /api/stats             # 7-day summary (runs, tokens, commits, PRs, by provider)
-GET  /api/daily             # per-day breakdown for charts
+GET  /api/runs              # paginated list, filterable by provider/status/user/ticket/date — scoped per-user
+GET  /api/runs/:id          # single run detail — scoped per-user
+GET  /api/stats             # 7-day summary (runs, tokens, commits, PRs, by provider) — scoped per-user
+GET  /api/daily             # per-day breakdown for charts — scoped per-user
 GET  /api/providers         # active providers
-GET  /api/users             # users seen in runs
-GET  /api/stream            # SSE stream of live run events
-POST /api/v1/ingest         # collector ships raw JSONL transcript here
+GET  /api/users             # users seen in runs — scoped per-user
+GET  /api/stream            # SSE stream of live run events — scoped per-user
+POST /api/v1/ingest         # collector ships raw JSONL transcript here (X-API-Key auth, unchanged)
 GET  /collector.py          # collector script download
 GET  /install.sh            # one-command install script
+
+POST   /api/login           # username + password → sets signed session cookie (30d expiry)
+POST   /api/logout          # clears session cookie
+GET    /api/me              # current session identity ({username, is_admin}); null username = no accounts yet
+GET    /api/accounts        # list user accounts (admin-only)
+POST   /api/accounts        # create account (open when zero accounts exist — bootstrap; admin-only after)
+DELETE /api/accounts/:username  # revoke account (admin-only, blocks removing the last admin)
+PATCH  /api/accounts/:username  # toggle is_admin (admin-only, blocks demoting the last admin)
+GET    /api/keys            # list API keys (admin-only)
+POST   /api/keys            # create API key (admin-only)
+DELETE /api/keys/:key_prefix    # revoke API key (admin-only)
 ```
 
 ---
 
 ## Frontend Pages
+
+### `/login` — Login
+- Username + password form, posts to `/api/login`, redirects to `/` on success
+- Rendered outside the main `<Layout>` (no sidebar/nav)
 
 ### `/` — Overview Dashboard
 - Summary cards: total runs (7d), total tokens (7d), active providers, commits/PRs made
@@ -195,6 +224,11 @@ GET  /install.sh            # one-command install script
 - Token breakdown: input vs output, per-message if available
 - Raw metadata drawer (collapsible)
 
+### `/settings` — Settings
+- Users section: create/revoke accounts, toggle admin (admin-only; shows a create-first-account form instead when zero accounts exist yet)
+- API Keys section: create/revoke ingest API keys (admin-only)
+- Non-admins see neither section
+
 ---
 
 ## File Structure
@@ -203,10 +237,10 @@ GET  /install.sh            # one-command install script
 ai_dash/
 ├── frontend/
 │   ├── src/
-│   │   ├── components/      # Card, Badge, Sparkline, TraceTree, RunsTable
-│   │   ├── pages/           # Dashboard, Runs, RunDetail
+│   │   ├── components/      # Card, Badge, Sparkline, TraceTree, RunsTable, Layout
+│   │   ├── pages/           # Dashboard, Runs, RunDetail, Settings, Login
 │   │   ├── lib/
-│   │   │   ├── api.ts       # TanStack Query hooks
+│   │   │   ├── api.ts       # TanStack Query hooks (incl. useMe/login/logout)
 │   │   │   └── sse.ts       # SSE client hook
 │   │   └── main.tsx
 │   ├── index.html
@@ -214,11 +248,13 @@ ai_dash/
 │   └── package.json
 ├── backend/
 │   ├── adapters/
-│   │   ├── claude_code.py   # MCP server + event parser
-│   │   ├── openai.py        # HTTPS proxy :8001
-│   │   └── gemini.py        # HTTPS proxy :8002
+│   │   ├── claude_code.py   # Claude Code JSONL transcript parser
+│   │   ├── codex.py         # Codex CLI (OpenAI) transcript parser
+│   │   └── gemini_cli.py    # Gemini CLI transcript parser
 │   ├── api/
-│   │   └── routes.py
+│   │   ├── routes.py        # runs/stats/daily/providers/users/keys/ingest/stream
+│   │   └── auth_routes.py   # login/logout/me/accounts CRUD
+│   ├── auth.py               # password hashing, session tokens, auth dependencies
 │   ├── models.py
 │   ├── db.py
 │   └── main.py
@@ -239,17 +275,17 @@ ai_dash/
 7. ✅ Custom domain — `dash.ai-coordinator.io` via Cloudflare Worker
 8. ✅ Collector daemon — ships local transcripts to live server
 9. ✅ Trace tree — `parent_id` linkage + nested expand/collapse UI in RunDetail
-10. ⬜ OpenAI adapter — proxy or SDK integration (v2)
-11. ⬜ Gemini adapter — proxy or SDK integration (v2)
-12. ✅ Multi-user isolation — per-user data visibility, user switcher, UserContext
-13. ✅ API key management UI — Settings page with create/copy/delete
+10. ✅ OpenAI adapter — Codex CLI transcript parser, same shape as Claude Code (AI-46)
+11. ✅ Gemini adapter — Gemini CLI transcript parser, same shape as Claude Code (AI-47)
+12. ✅ Multi-user data model — `user` field on `AgentRun`/`ApiKey`; initial client-side filter dropdown (later replaced by real per-user auth in AI-7)
+13. ✅ API key management UI — Settings page with create/copy/delete (now admin-only, see AI-7)
 14. ⬜ Cost tracking — estimate $ spend from token counts × model pricing table; show on dashboard + run detail (AI-5)
-15. ⬜ Installer — new `install.sh` one-liner to replace deleted version; launchd/systemd service setup (AI-6)
+15. ✅ Installer — `install.sh` one-liner; launchd/systemd service setup (AI-6)
 16. ⬜ Clickable links — PR URLs, GitHub commit links, and ticket refs (Linear / Jira) in run list and detail; prefer PR over bare commit; fall back to commit URL constructed from git remote; ticket URL from configured org base URL in Settings (AI-8)
-17. ⬜ Auth — per-user login to replace shared dashboard password (AI-7)
-18. ⬜ Remove seed/demo data from production DB (AI-9)
+17. ✅ Auth — per-user accounts, session-cookie login, and per-user data scoping, replacing the shared dashboard password (AI-7). `DASHBOARD_PASSWORD` remains as a one-way fallback until the first account is created.
+18. ✅ Remove seed/demo data from production DB (AI-9)
 19. ⬜ Backend pytest test suite for API + ingest logic (AI-17)
-20. ⬜ CI — automatic deploy to Cloud Run on merge to main (AI-18)
+20. ✅ CI — automatic deploy to Cloud Run on merge to main (AI-18)
 
 ---
 
