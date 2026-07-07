@@ -96,6 +96,7 @@ def get_session():
 def _seed():
     from sqlalchemy import text
     from backend.models import AgentRun, ApiKey
+    from backend.watcher import MIN_TOKENS_TO_PERSIST
     with Session(engine) as session:
         if not session.exec(select(ApiKey)).first():
             key = ApiKey(key="adk_devkey_local", user="Gabby")
@@ -112,7 +113,7 @@ def _seed():
             # Remove zero-token stubs, system-prompt-labeled sub-agents, and trivial micro-sessions
             deleted = session.exec(text(
                 "DELETE FROM agent_runs WHERE "
-                "(input_tokens + output_tokens < 150) OR "
+                f"(input_tokens + output_tokens < {MIN_TOKENS_TO_PERSIST}) OR "
                 "(label LIKE 'You are %')"
             ))
             session.commit()
