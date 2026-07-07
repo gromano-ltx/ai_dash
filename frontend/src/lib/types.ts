@@ -16,6 +16,9 @@ export interface AgentRun {
   ticket_refs: string[];
   parent_id: string | null;
   meta: { github_repo?: string; git_branch?: string; [key: string]: unknown };
+  estimated_input_cost_usd: number | null;
+  estimated_output_cost_usd: number | null;
+  estimated_cost_usd: number | null;
 }
 
 export interface DailyBucket {
@@ -40,6 +43,7 @@ export interface Stats {
   total_output_tokens_7d: number;
   total_commits_7d: number;
   total_prs_7d: number;
+  total_cost_usd: number;
   active_providers: string[];
   running_count: number;
   by_provider: Record<string, ProviderStats>;
