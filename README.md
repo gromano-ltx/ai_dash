@@ -69,29 +69,30 @@ Backend API: http://localhost:8000
 
 ## Collector setup
 
-The collector watches `~/.claude/projects/` and ships transcripts to the server.
+The collector watches `~/.claude/projects/` and ships transcripts to the server. Get an API key
+from an admin (Settings → API Keys on the dashboard) before you start.
 
-**Config** — create `~/.ai_dash/config.json`:
-```json
-{"url": "https://dash.ai-coordinator.io", "key": "your-api-key"}
-```
-
-**Run manually:**
-```bash
-python -m collector.collector
-```
-
-**Run as a background service (recommended)** — the installer creates a dedicated virtualenv
-(isolated from any other Python project on your machine), downloads the collector, and registers
-it as a launchd (macOS) / systemd (Linux) service that restarts automatically and logs to
-`~/.ai_dash/collector.log` (rotated at 5MB × 3 backups, ~20MB max):
-
+**One-line install (recommended):**
 ```bash
 curl -fsSL https://dash.ai-coordinator.io/install.sh | bash
 ```
 
-Re-running the command is safe — it reuses the existing virtualenv and config, and just refreshes
-the collector code and service definition.
+This creates a dedicated virtualenv (isolated from any other Python project on your machine),
+downloads the collector, prompts for your API key on first run only, and registers it as a
+launchd (macOS) / systemd (Linux) service that restarts automatically and logs to
+`~/.ai_dash/collector.log` (rotated at 5MB × 3 backups, ~20MB max). Re-running the command is
+safe — it reuses the existing virtualenv and config, and just refreshes the collector code and
+service definition.
+
+**Manual run** (advanced — foreground only, no background service). Requires creating the config
+file yourself first, since this path has no interactive prompt:
+```bash
+mkdir -p ~/.ai_dash && cat > ~/.ai_dash/config.json <<'EOF'
+{"url": "https://dash.ai-coordinator.io", "key": "your-api-key"}
+EOF
+python -m collector.collector
+```
+Dependencies (`httpx`, `watchfiles`) install automatically on first run.
 
 ---
 
