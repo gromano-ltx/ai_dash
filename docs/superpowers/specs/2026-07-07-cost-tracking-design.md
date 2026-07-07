@@ -1,12 +1,12 @@
-# AI-5: Cost tracking — estimated $ spend per run and on dashboard
+# AI-5: Cost tracking: estimated $ spend per run and on dashboard
 
 ## Context
 
 The dashboard tracks token usage per run (`AgentRun.input_tokens`/`output_tokens`) but has no
-concept of dollar cost anywhere — `grep`ing the repo for pricing/cost/`$`-related logic turns up
+concept of dollar cost anywhere: `grep`ing the repo for pricing/cost/`$`-related logic turns up
 nothing. Runs are ingested from three providers (Claude Code/Anthropic, Codex CLI/OpenAI, Gemini
 CLI/Gemini), each with its own model string extracted verbatim from the transcript (e.g. a versioned
-Anthropic model ID, or literal strings like `"gpt-5-codex"`/`"gemini-3.5-flash"`) — none of these
+Anthropic model ID, or literal strings like `"gpt-5-codex"`/`"gemini-3.5-flash"`), and none of these
 strings are normalized anywhere in the codebase today.
 
 Both ingest paths (the API-key `POST /api/v1/ingest` endpoint used by the collector, and the local
@@ -30,7 +30,7 @@ Resolved during brainstorming; each has a real alternative, so called out explic
 2. **Model-to-price matching is tier-based substring matching, not exact string matching.** Model
    strings are exact, dated/versioned IDs with no normalization anywhere in this codebase. Matching
    on a tier keyword (e.g. any string containing `"sonnet"`) survives new dated model releases
-   without a code change — at the cost of being approximate if a future model tier reuses an old
+   without a code change, at the cost of being approximate if a future model tier reuses an old
    tier's keyword but is priced differently.
 3. **Unmatched models get `null` cost, not a fallback estimate.** A run whose model string doesn't
    match any known tier is excluded from cost display and from `total_cost_usd` sums, rather than
@@ -38,10 +38,10 @@ Resolved during brainstorming; each has a real alternative, so called out explic
 4. **Historical rows get a one-time backfill, not forward-only computation.** Unlike a past case in
    this codebase (`ended_at` backfill, where the source data for old rows didn't exist), every
    existing run already has `model`/`input_tokens`/`output_tokens` stored, so retroactive
-   computation is possible and worth doing — otherwise the dashboard's $ totals would silently
+   computation is possible and worth doing; otherwise the dashboard's $ totals would silently
    undercount for any time range spanning pre-feature runs.
-5. **Pricing table is a hardcoded Python constant, computed once at ingest — not a config file, not
-   an admin-editable DB table.** Matches the DoD's literal "pricing table in backend" wording, fits
+5. **Pricing table is a hardcoded Python constant, computed once at ingest (not a config file, not
+   an admin-editable DB table).** Matches the DoD's literal "pricing table in backend" wording, fits
    this codebase's existing style (no Alembic, hand-rolled migrations, plain Python constants), and
    keeps the "estimated, can change" framing honest: updating prices means a code change + redeploy
    + re-running the backfill, appropriate for something explicitly labeled an estimate rather than
@@ -52,7 +52,7 @@ Resolved during brainstorming; each has a real alternative, so called out explic
 7. **The backfill also self-heals unmatched rows.** It only touches rows where
    `estimated_cost_usd IS NULL`, so a run that couldn't be matched at ingest time (e.g. because its
    model tier was added to the pricing table *after* that run was ingested) gets picked up
-   automatically the next time the backfill runs (every startup) — no separate "recompute costs"
+   automatically the next time the backfill runs (every startup), with no separate "recompute costs"
    mechanism needed. The tradeoff: correcting an already-matched run's *price* (not adding a new
    tier) does NOT retroactively update it, since its `estimated_cost_usd` is already non-null. See
    "Known limitation" below.
@@ -60,7 +60,7 @@ Resolved during brainstorming; each has a real alternative, so called out explic
 ## Data model
 
 Three new optional fields on `AgentRun` (`backend/models.py`), computed together in a single call so
-they can never drift out of sync with each other — always either all three are set, or all three are
+they can never drift out of sync with each other; always either all three are set, or all three are
 `None`:
 
 ```python
@@ -72,14 +72,14 @@ estimated_cost_usd: Optional[float] = None   # = estimated_input_cost_usd + esti
 Mirrored on `AgentRunRead` so they're exposed via the API (no handler changes needed beyond adding
 the fields, since `_to_read()` already does `run.model_dump()`).
 
-These are columns on the *existing* `agent_runs` table, so — matching this codebase's established
+These are columns on the *existing* `agent_runs` table, so, matching this codebase's established
 pattern (no Alembic; `SQLModel.metadata.create_all()` only creates missing tables, never alters
-existing ones) — they need the same hand-rolled `ALTER TABLE` treatment `backend/db.py`'s
+existing ones), they need the same hand-rolled `ALTER TABLE` treatment `backend/db.py`'s
 `_add_missing_columns()` already uses for the existing `updated_at` column.
 
 ## Pricing table & cost estimation
 
-New file `backend/pricing.py` — a pure module with no DB/network access, trivially unit-testable:
+New file `backend/pricing.py` is a pure module with no DB/network access, trivially unit-testable:
 
 ```python
 from typing import NamedTuple, Optional
@@ -97,12 +97,12 @@ class EstimatedCost(NamedTuple):
 
 
 # Keyed by provider, then an ordered list of (tier keyword, price) pairs.
-# Matched as a case-insensitive substring of the run's `model` string — model
+# Matched as a case-insensitive substring of the run's `model` string: model
 # strings are exact, dated/versioned IDs with no normalization anywhere in
 # this codebase, so keyword matching survives new dated releases without a
 # code change. First match wins, so order matters if keywords could overlap.
 #
-# NEEDS VERIFICATION against current official pricing before merging — these
+# NEEDS VERIFICATION against current official pricing before merging: these
 # are best-effort placeholder figures, not confirmed current prices.
 PRICING: dict[str, list[tuple[str, ModelPrice]]] = {
     "anthropic": [
@@ -139,7 +139,7 @@ code sees the pricing hasn't been independently confirmed against official prici
 
 ## Ingest-time computation
 
-Hooked into `_upsert()` in `backend/watcher.py` — the single choke point both the API-key ingest path
+Hooked into `_upsert()` in `backend/watcher.py`, the single choke point both the API-key ingest path
 (`backend/api/routes.py`'s `ingest_transcript`) and the local watcher path already share:
 
 ```python
@@ -177,7 +177,7 @@ if uncosted:
     print(f"[db] backfilled estimated cost for {len(uncosted)} runs")
 ```
 
-Naturally idempotent — only touches rows where `estimated_cost_usd IS NULL` — and self-healing for
+Naturally idempotent (only touches rows where `estimated_cost_usd IS NULL`) and self-healing for
 newly-added pricing tiers (see decision #7), but see "Known limitation" below for what it does *not*
 fix.
 
@@ -193,25 +193,25 @@ tokens/commits, skipping `None`s:
 ```
 
 **`GET /api/runs`** and **`GET /api/runs/:id`** automatically expose the three new fields once added
-to `AgentRunRead` — no handler changes needed.
+to `AgentRunRead`; no handler changes needed.
 
-**`GET /api/daily`** is explicitly untouched — out of scope per the DoD (stat card + run-detail
+**`GET /api/daily`** is explicitly untouched: out of scope per the DoD (stat card + run-detail
 breakdown only, no daily cost chart).
 
 ## Frontend
 
-**`Dashboard.tsx`** — one new `StatCard` in the existing 4-card grid, reading `stats.total_cost_usd`:
+**`Dashboard.tsx`**: one new `StatCard` in the existing 4-card grid, reading `stats.total_cost_usd`:
 
 ```tsx
 <StatCard
   label="Est. Spend"
   value={stats ? `$${stats.total_cost_usd.toFixed(2)}` : "—"}
-  sub="estimated — pricing may change"
+  sub="estimated; pricing may change"
   accent="#ec4899"
 />
 ```
 
-**`RunDetail.tsx`** — a new card mirroring the existing "Tokens" card's 3-column (input/output/total)
+**`RunDetail.tsx`**: a new card mirroring the existing "Tokens" card's 3-column (input/output/total)
 structure, placed as a sibling right after it:
 
 ```tsx
@@ -226,7 +226,7 @@ structure, placed as a sibling right after it:
       <div><p className="text-xs text-slate-500">Total</p><p>${run.estimated_cost_usd.toFixed(4)}</p></div>
     </div>
   ) : (
-    <p className="text-sm text-slate-600">Unknown model — no pricing data</p>
+    <p className="text-sm text-slate-600">Unknown model: no pricing data</p>
   )}
 </div>
 ```
@@ -237,13 +237,13 @@ fields and `total_cost_usd` respectively.
 ## Error handling & edge cases
 
 - **Unmatched model** → all three cost fields stay `None`; excluded from `total_cost_usd`; UI shows
-  "Unknown model — no pricing data" instead of a dollar figure.
+  "Unknown model: no pricing data" instead of a dollar figure.
 - **Zero tokens of one kind** → `estimate_cost` still returns a valid result with `0.0` for that
-  side — no special-casing needed, the arithmetic just works.
-- **Known limitation — correcting an already-matched price doesn't retroactively fix old rows.**
+  side: no special-casing needed, the arithmetic just works.
+- **Known limitation: correcting an already-matched price doesn't retroactively fix old rows.**
   The backfill only touches rows where `estimated_cost_usd IS NULL`. If a price in `PRICING` is
   *corrected* (not newly added) after some runs already have a stored cost from the old price, those
-  runs keep the stale value — the backfill's null-check won't re-touch them. Forcing a full
+  runs keep the stale value; the backfill's null-check won't re-touch them. Forcing a full
   recompute after a price correction would require a manual one-off (e.g. nulling the columns
   first); this design does not build a dedicated mechanism for that, consistent with treating this
   as a rough estimate rather than precision billing.
@@ -259,7 +259,7 @@ fields and `total_cost_usd` respectively.
   leaves unmatched ones `None`, is idempotent (running twice doesn't change already-computed values).
 - **`backend/api/test_routes.py`** (extend) or a new file: `total_cost_usd` in `/api/stats` sums
   correctly and skips `None`s.
-- **Frontend**: no test runner in this repo (established constraint, not introduced here) — manual
+- **Frontend**: no test runner in this repo (established constraint, not introduced here); manual
   verification: seed a run with a known model/token count, confirm the dashboard stat card and
   run-detail breakdown show the expected dollar figures; confirm an unmatched-model run shows the
   fallback message instead of `$NaN` or a blank value.
@@ -267,7 +267,7 @@ fields and `total_cost_usd` respectively.
 ## Out of scope
 
 - Per-day cost in the `/api/daily` chart (DoD only asks for the stat card + run-detail breakdown).
-- Admin-editable pricing (Settings UI or DB-backed pricing table) — hardcoded Python constant only.
+- Admin-editable pricing (Settings UI or DB-backed pricing table): hardcoded Python constant only.
 - Automatic re-pricing of historical rows when an existing tier's price is corrected (see "Known
-  limitation" above) — only newly-added tiers get picked up by the backfill.
+  limitation" above); only newly-added tiers get picked up by the backfill.
 - Non-USD currencies.
