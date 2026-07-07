@@ -29,6 +29,9 @@ class AgentRun(SQLModel, table=True):
     ticket_refs: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     parent_id: Optional[str] = None
     meta: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    estimated_input_cost_usd: Optional[float] = None
+    estimated_output_cost_usd: Optional[float] = None
+    estimated_cost_usd: Optional[float] = None
 
 
 class TranscriptStore(SQLModel, table=True):
@@ -73,3 +76,6 @@ class AgentRunRead(SQLModel):
     ticket_refs: list[str] = Field(default_factory=list)
     parent_id: Optional[str] = None
     meta: dict = Field(default_factory=dict)
+    estimated_input_cost_usd: Optional[float] = None
+    estimated_output_cost_usd: Optional[float] = None
+    estimated_cost_usd: Optional[float] = None
