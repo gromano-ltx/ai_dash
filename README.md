@@ -36,16 +36,42 @@ growing conversation as context on every turn, and most of that gets served from
 the re-sent cached portion, otherwise a long session would look inflated by the same context being
 counted again on every turn.
 
-`meta.cached_input_tokens` captures that excluded, discounted portion separately — not shown on the
-dashboard today, but tracked so future cost-tracking work can price fresh vs. cached tokens
-correctly without re-parsing transcripts again.
+`meta.cached_input_tokens` captures that excluded, discounted portion separately, and is priced into
+`estimated_cost_usd` (see below) at each provider's cache-read discount rate.
 
 `output_tokens` is never cached for any provider, so it needs no such adjustment.
 
 One known asymmetry: Claude Code's API also reports `cache_creation_input_tokens` (the cost of
 *writing* a new cache entry — a premium-priced, fresh-content category, not a discounted-reuse one).
-That's not captured yet; it's a different economic category than `cached_input_tokens` and would
-need its own pricing treatment.
+That's not captured yet; it's a different economic category than `cached_input_tokens`, isn't
+currently parsed by any adapter, and needs its own pricing treatment.
+
+---
+
+## Cost estimation
+
+`estimated_cost_usd` (`backend/pricing.py`) is a best-effort estimate, not a billing-grade figure —
+treat it as directional. Per-model $/MTok rates are matched by a case-insensitive keyword against
+the run's `model` string (e.g. `"sonnet"` matches any `claude-sonnet-*` id), verified against each
+provider's official pricing page as of 2026-07-08:
+[Anthropic](https://platform.claude.com/docs/en/about-claude/pricing),
+[OpenAI](https://developers.openai.com/api/docs/pricing),
+[Gemini](https://ai.google.dev/gemini-api/docs/pricing).
+
+`meta.cached_input_tokens` is priced at each provider's cache-read discount (10% of the base input
+rate — verified for all three providers as of the same date) and folded into `estimated_input_cost_usd`;
+there's no separate cached-cost column. `cache_creation_input_tokens` isn't tracked yet (see Token
+accounting above), so cache-write cost is never included — `estimated_cost_usd` under-counts spend
+for sessions that write a lot of fresh cache entries.
+
+Claude Sonnet 5 has a time-boundaried introductory price ($2/$10 per MTok through 2026-08-31, then
+$3/$15 from 2026-09-01) — `pricing.py` special-cases it with a real date check rather than a static
+table entry, so it self-corrects at the cutover without a code change.
+
+Known limitation of keyword matching: it can't distinguish between two versions of the same tier
+(e.g. Claude Sonnet 4.5 vs. an older/newer Sonnet release with different pricing) unless a specific
+keyword is added for it, the way `sonnet-5` was for the introductory-pricing case above. Re-verify
+`PRICING` before trusting `estimated_cost_usd` for a new model generation.
 
 ---
 

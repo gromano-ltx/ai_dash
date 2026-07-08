@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from typing import NamedTuple, Optional
 
 
@@ -12,39 +13,78 @@ class EstimatedCost(NamedTuple):
     total_usd: float
 
 
+# Cache reads are billed at a fraction of the base input price rather than
+# being free. Verified against each provider's current official pricing docs
+# (all three land on the same 10% figure):
+#   Anthropic: https://platform.claude.com/docs/en/about-claude/pricing ("Cache read (hit): 0.1x base input price")
+#   OpenAI:    https://developers.openai.com/api/docs/pricing (cached input = 10% of input, e.g. gpt-5.4 $2.50 -> $0.25)
+#   Gemini:    https://ai.google.dev/gemini-api/docs/pricing (gemini-3.5-flash: $1.50 input -> $0.15 cached)
+# Folded into `input_usd` below (not a separate field) since AgentRun only
+# has input/output/total cost columns.
+CACHE_READ_MULTIPLIER = 0.1
+
 # Keyed by provider, then an ordered list of (tier keyword, price) pairs.
 # Matched as a case-insensitive substring of the run's `model` string: model
 # strings are exact, dated/versioned IDs with no normalization anywhere in
 # this codebase, so keyword matching survives new dated releases without a
 # code change. First match wins, so order matters if keywords could overlap.
 #
-# NEEDS VERIFICATION against current official pricing before merging: these
-# are best-effort placeholder figures, not confirmed current prices.
+# Verified against official pricing pages on 2026-07-08:
+#   Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
+#   OpenAI:    https://developers.openai.com/api/docs/pricing (bare "gpt-5-codex", not the newer gpt-5.3-codex)
+#   Gemini:    https://ai.google.dev/gemini-api/docs/pricing
 PRICING: dict[str, list[tuple[str, ModelPrice]]] = {
     "anthropic": [
-        ("opus", ModelPrice(15.00, 75.00)),
+        # claude-sonnet-5 has its own time-boundaried introductory price —
+        # handled as a special case in estimate_cost() below, checked before
+        # this generic "sonnet" tier (which still covers 4.5/4.6).
+        ("opus", ModelPrice(5.00, 25.00)),
         ("sonnet", ModelPrice(3.00, 15.00)),
-        ("haiku", ModelPrice(0.80, 4.00)),
+        ("haiku", ModelPrice(1.00, 5.00)),
     ],
     "openai": [
         ("codex", ModelPrice(1.25, 10.00)),
     ],
     "gemini": [
-        ("flash", ModelPrice(0.35, 1.05)),
+        ("flash", ModelPrice(1.50, 9.00)),
     ],
 }
 
+# Claude Sonnet 5 introductory pricing: $2/$10 per MTok through 2026-08-31,
+# then standard $3/$15 from 2026-09-01. Source: platform.claude.com pricing
+# docs (see PRICING comment above).
+_SONNET_5_INTRO_PRICE = ModelPrice(2.00, 10.00)
+_SONNET_5_STANDARD_PRICE = ModelPrice(3.00, 15.00)
+_SONNET_5_PRICE_CUTOVER = date(2026, 9, 1)
+
+
+def _sonnet_5_price() -> ModelPrice:
+    if datetime.utcnow().date() < _SONNET_5_PRICE_CUTOVER:
+        return _SONNET_5_INTRO_PRICE
+    return _SONNET_5_STANDARD_PRICE
+
 
 def estimate_cost(
-    provider: str, model: str, input_tokens: int, output_tokens: int
+    provider: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cached_input_tokens: int = 0,
 ) -> Optional[EstimatedCost]:
-    tiers = PRICING.get(provider)
-    if not tiers:
-        return None
     model_lower = model.lower()
-    for keyword, price in tiers:
-        if keyword in model_lower:
-            input_usd = input_tokens / 1_000_000 * price.input_per_1m_usd
-            output_usd = output_tokens / 1_000_000 * price.output_per_1m_usd
-            return EstimatedCost(input_usd, output_usd, input_usd + output_usd)
-    return None
+
+    price = None
+    if provider == "anthropic" and "sonnet-5" in model_lower:
+        price = _sonnet_5_price()
+    else:
+        tiers = PRICING.get(provider)
+        if tiers:
+            price = next((p for keyword, p in tiers if keyword in model_lower), None)
+
+    if price is None:
+        return None
+
+    input_usd = input_tokens / 1_000_000 * price.input_per_1m_usd
+    cached_usd = cached_input_tokens / 1_000_000 * price.input_per_1m_usd * CACHE_READ_MULTIPLIER
+    output_usd = output_tokens / 1_000_000 * price.output_per_1m_usd
+    return EstimatedCost(input_usd + cached_usd, output_usd, input_usd + cached_usd + output_usd)

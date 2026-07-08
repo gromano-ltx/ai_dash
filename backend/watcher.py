@@ -40,7 +40,8 @@ def _upsert(run: AgentRun) -> bool:
     below MIN_TOKENS_TO_PERSIST, matching the ingest endpoint's behavior."""
     if run.input_tokens + run.output_tokens < MIN_TOKENS_TO_PERSIST:
         return False
-    cost = estimate_cost(run.provider, run.model, run.input_tokens, run.output_tokens)
+    cached_input_tokens = run.meta.get("cached_input_tokens", 0) if isinstance(run.meta, dict) else 0
+    cost = estimate_cost(run.provider, run.model, run.input_tokens, run.output_tokens, cached_input_tokens)
     if cost:
         run.estimated_input_cost_usd = cost.input_usd
         run.estimated_output_cost_usd = cost.output_usd

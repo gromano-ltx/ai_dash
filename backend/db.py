@@ -229,27 +229,33 @@ def _seed():
                 print(f"[db] backfilled ended_at for {len(stuck)} runs stuck done with null duration")
             _backfill_cached_input_tokens(session)
             _backfill_ticket_refs(session)
-            # One-time backfill: existing rows already have model/input_tokens/
+            # Backfill: existing rows already have model/input_tokens/
             # output_tokens stored, so cost can be computed retroactively,
             # unlike the ended_at backfill above where the source data for old
-            # rows didn't exist. Only touches rows where estimated_cost_usd is
-            # still NULL, so it's naturally idempotent and self-heals rows
-            # whose model tier gets added to PRICING after they were ingested.
+            # rows didn't exist. Recomputes for every row (not just
+            # estimated_cost_usd IS NULL) and only writes when the value
+            # actually changes, so it's naturally idempotent, self-heals rows
+            # whose model tier gets added to PRICING after they were ingested,
+            # AND self-corrects rows costed under a since-fixed pricing bug
+            # (e.g. the cache-read tokens being priced at $0 before this fix).
             # Runs *after* _backfill_cached_input_tokens so cost is computed
             # from the corrected (cache-excluded) input_tokens, not the stale
             # pre-AI-54 value.
             from backend.pricing import estimate_cost
 
-            uncosted = session.exec(
-                select(AgentRun).where(AgentRun.estimated_cost_usd == None)  # noqa: E711
-            ).all()
-            if uncosted:
-                for r in uncosted:
-                    cost = estimate_cost(r.provider, r.model, r.input_tokens, r.output_tokens)
-                    if cost:
-                        r.estimated_input_cost_usd = cost.input_usd
-                        r.estimated_output_cost_usd = cost.output_usd
-                        r.estimated_cost_usd = cost.total_usd
-                        session.add(r)
+            all_runs = session.exec(select(AgentRun)).all()
+            recosted = 0
+            for r in all_runs:
+                cached = r.meta.get("cached_input_tokens", 0) if isinstance(r.meta, dict) else 0
+                cost = estimate_cost(r.provider, r.model, r.input_tokens, r.output_tokens, cached)
+                new_total = cost.total_usd if cost else None
+                if new_total == r.estimated_cost_usd:
+                    continue
+                r.estimated_input_cost_usd = cost.input_usd if cost else None
+                r.estimated_output_cost_usd = cost.output_usd if cost else None
+                r.estimated_cost_usd = new_total
+                session.add(r)
+                recosted += 1
+            if recosted:
                 session.commit()
-                print(f"[db] backfilled estimated cost for {len(uncosted)} runs")
+                print(f"[db] backfilled estimated cost for {recosted} runs")
