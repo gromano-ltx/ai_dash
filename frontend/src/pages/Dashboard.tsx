@@ -133,6 +133,12 @@ export function Dashboard() {
         />
         <StatCard label="Commits" value={stats?.total_commits_7d ?? "—"} accent="#6b8f7a" />
         <StatCard label="PRs Opened" value={stats?.total_prs_7d ?? "—"} accent="#7288a3" />
+        <StatCard
+          label="Est. Spend"
+          value={stats ? `$${stats.total_cost_usd.toFixed(2)}` : "—"}
+          sub="estimated; pricing may change"
+          accent="#a8320c"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
