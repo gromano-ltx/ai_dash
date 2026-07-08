@@ -22,6 +22,7 @@ GIT_PUSH_RE = re.compile(r'\bgit push\b')
 GIT_REMOTE_RE = re.compile(r'\bgit remote\b')
 COMMIT_HASH_RE = re.compile(r'\[[\w/._-]+ ([0-9a-f]{7,40})\]')
 PR_URL_RE = re.compile(r'https://github\.com/\S+/pull/\d+')
+PR_URL_NUMBER_RE = re.compile(r'/pull/(\d+)')
 GITHUB_REPO_RE = re.compile(r'(?:https://github\.com/|github\.com:)([\w.-]+/[\w.-]+?)(?:\.git)?(?:[/\s]|$)')
 
 
@@ -32,7 +33,12 @@ def _parse_ts(ts_str: str) -> datetime:
         return datetime.utcnow()
 
 
-def _extract_tickets(text: str) -> list[str]:
+def _extract_tickets(text: str, pr_urls: Optional[list[str]] = None) -> list[str]:
+    # Squash-merge commit messages read "<title> (#40)", so a bare #N found in
+    # search_text is often just the PR self-reference — already shown, as a
+    # full URL, in git_prs. Excluding those numbers here avoids listing the
+    # same PR twice: once correctly under PRs, once as a bogus "ticket".
+    exclude_prs = {m for url in (pr_urls or []) for m in PR_URL_NUMBER_RE.findall(url)}
     refs = []
     for m in TICKET_RE.finditer(text):
         if m.group(1):
@@ -40,6 +46,8 @@ def _extract_tickets(text: str) -> list[str]:
                 continue
             ref = m.group(1)
         else:
+            if m.group(2) in exclude_prs:
+                continue
             ref = f"#{m.group(2)}"
         if ref not in refs:
             refs.append(ref)

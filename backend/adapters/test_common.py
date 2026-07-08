@@ -28,6 +28,18 @@ def test_extract_tickets_dedupes_preserving_order():
     assert _extract_tickets("AI-46 then AI-46 again, then AI-47") == ["AI-46", "AI-47"]
 
 
+def test_extract_tickets_excludes_number_already_in_pr_urls():
+    # Squash-merge commit messages read "<title> (#40)" — that's a PR
+    # self-reference, already shown as a full URL in git_prs, not a ticket.
+    text = "Merge pull request #40 from gromano-ltx/feature-x"
+    pr_urls = ["https://github.com/gromano-ltx/ai_dash/pull/40"]
+    assert _extract_tickets(text, pr_urls) == []
+
+
+def test_extract_tickets_keeps_issue_number_not_in_pr_urls():
+    assert _extract_tickets("closes #123", ["https://github.com/gromano-ltx/ai_dash/pull/40"]) == ["#123"]
+
+
 def test_parse_ts_handles_z_suffix():
     result = _parse_ts("2026-04-16T16:01:55.897Z")
     assert result == datetime(2026, 4, 16, 16, 1, 55, 897000)

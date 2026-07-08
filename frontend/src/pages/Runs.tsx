@@ -111,7 +111,7 @@ export function Runs() {
                 <td className="px-4 py-3 text-ledger-dim font-mono text-xs whitespace-nowrap text-right tabular-nums">{fmt(run.input_tokens + run.output_tokens)}</td>
                 <td className="px-4 py-3 text-xs font-mono">
                   {run.ticket_refs.length > 1
-                    ? <span className="text-ledger-accent">{run.ticket_refs.length} tickets</span>
+                    ? <span className="text-ledger-dim">{run.ticket_refs.length} tickets</span>
                     : run.ticket_refs[0]
                     ? (() => {
                         const url = ticketUrl(run.ticket_refs[0]);
@@ -119,7 +119,7 @@ export function Runs() {
                           ? <a href={url} target="_blank" rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
                               className="text-ledger-accent hover:underline">{run.ticket_refs[0]}</a>
-                          : <span className="text-ledger-accent">{run.ticket_refs[0]}</span>;
+                          : <span className="text-ledger-faint">{run.ticket_refs[0]}</span>;
                       })()
                     : <span className="text-ledger-faint">—</span>}
                 </td>

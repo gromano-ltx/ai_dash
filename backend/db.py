@@ -93,6 +93,40 @@ def _backfill_cached_input_tokens(session: Session):
         print(f"[db] backfilled cached_input_tokens for {migrated} runs")
 
 
+def _backfill_ticket_refs(session: Session):
+    """One-time-per-row backfill: recompute ticket_refs for rows ingested
+    before the fix that excludes PR self-references from _extract_tickets
+    (squash-merge commit messages read "<title> (#40)", which used to be
+    recorded as a bogus ticket ref even though the same PR is already listed,
+    as a full URL, in git_prs). Only ticket_refs is touched. Naturally
+    idempotent — skips rows where a fresh parse yields the same value, so
+    no separate "already migrated" marker is needed. Gemini rows are
+    skipped, matching AI-54's cached_input_tokens backfill.
+    """
+    from backend.adapters import claude_code, codex
+    from backend.models import AgentRun, TranscriptStore
+
+    parsers = {"openai": codex.parse_transcript_content, "anthropic": claude_code.parse_transcript_content}
+    rows = session.exec(
+        select(AgentRun).where(AgentRun.provider.in_(list(parsers.keys())))
+    ).all()
+    migrated = 0
+    for run in rows:
+        stored = session.get(TranscriptStore, run.id)
+        if not stored:
+            continue
+        parse_fn = parsers[run.provider]
+        reparsed = parse_fn(stored.content)
+        if not reparsed or reparsed.ticket_refs == run.ticket_refs:
+            continue
+        run.ticket_refs = reparsed.ticket_refs
+        session.add(run)
+        migrated += 1
+    if migrated:
+        session.commit()
+        print(f"[db] backfilled ticket_refs for {migrated} runs")
+
+
 def get_session():
     with Session(engine) as session:
         yield session
@@ -194,6 +228,7 @@ def _seed():
                 session.commit()
                 print(f"[db] backfilled ended_at for {len(stuck)} runs stuck done with null duration")
             _backfill_cached_input_tokens(session)
+            _backfill_ticket_refs(session)
             # One-time backfill: existing rows already have model/input_tokens/
             # output_tokens stored, so cost can be computed retroactively,
             # unlike the ended_at backfill above where the source data for old
