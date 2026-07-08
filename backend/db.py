@@ -75,8 +75,16 @@ def _backfill_cached_input_tokens(session: Session):
     ).all()
     migrated = 0
     for run in rows:
-        if isinstance(run.meta, dict) and "cached_input_tokens" in run.meta:
-            continue  # already migrated
+        # cache_creation_input_tokens was added after cached_input_tokens and
+        # only anthropic transcripts carry it (Codex's caching has no
+        # separate write-side token count), so a previously-migrated
+        # anthropic row must still be re-parsed once to pick up the new key;
+        # openai rows are unaffected and stay migrated on the older key alone.
+        already_migrated = isinstance(run.meta, dict) and "cached_input_tokens" in run.meta and (
+            run.provider != "anthropic" or "cache_creation_input_tokens" in run.meta
+        )
+        if already_migrated:
+            continue
         stored = session.get(TranscriptStore, run.id)
         if not stored:
             continue
@@ -246,8 +254,10 @@ def _seed():
             all_runs = session.exec(select(AgentRun)).all()
             recosted = 0
             for r in all_runs:
-                cached = r.meta.get("cached_input_tokens", 0) if isinstance(r.meta, dict) else 0
-                cost = estimate_cost(r.provider, r.model, r.input_tokens, r.output_tokens, cached)
+                run_meta = r.meta if isinstance(r.meta, dict) else {}
+                cached = run_meta.get("cached_input_tokens", 0)
+                cache_creation = run_meta.get("cache_creation_input_tokens", 0)
+                cost = estimate_cost(r.provider, r.model, r.input_tokens, r.output_tokens, cached, cache_creation)
                 new_total = cost.total_usd if cost else None
                 if new_total == r.estimated_cost_usd:
                     continue

@@ -43,8 +43,9 @@ counted again on every turn.
 
 One known asymmetry: Claude Code's API also reports `cache_creation_input_tokens` (the cost of
 *writing* a new cache entry — a premium-priced, fresh-content category, not a discounted-reuse one).
-That's not captured yet; it's a different economic category than `cached_input_tokens`, isn't
-currently parsed by any adapter, and needs its own pricing treatment.
+`meta.cache_creation_input_tokens` captures this (Claude Code only — Codex/Gemini's caching is fully
+automatic with no separate write-side token count) and is priced into `estimated_cost_usd` (see
+below) at a cache-write premium, not a discount.
 
 ---
 
@@ -59,10 +60,11 @@ provider's official pricing page as of 2026-07-08:
 [Gemini](https://ai.google.dev/gemini-api/docs/pricing).
 
 `meta.cached_input_tokens` is priced at each provider's cache-read discount (10% of the base input
-rate — verified for all three providers as of the same date) and folded into `estimated_input_cost_usd`;
-there's no separate cached-cost column. `cache_creation_input_tokens` isn't tracked yet (see Token
-accounting above), so cache-write cost is never included — `estimated_cost_usd` under-counts spend
-for sessions that write a lot of fresh cache entries.
+rate — verified for all three providers as of the same date), and `meta.cache_creation_input_tokens`
+(Claude Code only) at Anthropic's cache-write premium (1.25x base input rate, the 5-minute-cache
+multiplier — the aggregate usage field doesn't distinguish 5-minute from the pricier 1-hour writes,
+so this is a conservative estimate, not exact). Both fold into `estimated_input_cost_usd`; there's no
+separate cached-cost column.
 
 Claude Sonnet 5 has a time-boundaried introductory price ($2/$10 per MTok through 2026-08-31, then
 $3/$15 from 2026-09-01) — `pricing.py` special-cases it with a real date check rather than a static

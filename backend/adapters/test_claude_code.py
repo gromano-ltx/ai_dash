@@ -97,3 +97,9 @@ def test_parse_transcript_content_captures_cached_input_tokens_in_meta():
     run = parse_transcript_content(_sample_session())
     # req-1 (deduped) cache_read_input_tokens=300 + req-2's 250 = 550.
     assert run.meta["cached_input_tokens"] == 550
+
+
+def test_parse_transcript_content_captures_cache_creation_input_tokens_in_meta():
+    run = parse_transcript_content(_sample_session())
+    # req-1 (deduped) cache_creation_input_tokens=50 + req-2's 0 = 50.
+    assert run.meta["cache_creation_input_tokens"] == 50
