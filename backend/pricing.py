@@ -23,6 +23,17 @@ class EstimatedCost(NamedTuple):
 # has input/output/total cost columns.
 CACHE_READ_MULTIPLIER = 0.1
 
+# Cache *writes* are a premium, not a discount: Anthropic charges 1.25x the
+# base input price for a 5-minute cache write (2x for a 1-hour write — we
+# have no way to tell which TTL was used from the aggregate usage field, so
+# 1.25x is used as the conservative/common-case default). Source:
+# https://platform.claude.com/docs/en/about-claude/pricing ("5-minute cache
+# write: 1.25x base input price"). Only Claude Code's transcripts expose a
+# cache_creation_input_tokens figure — Codex/Gemini's caching is fully
+# automatic with no separate write-side token count, so this multiplier is
+# only ever applied when that value is non-zero (anthropic rows).
+CACHE_WRITE_MULTIPLIER = 1.25
+
 # Keyed by provider, then an ordered list of (tier keyword, price) pairs.
 # Matched as a case-insensitive substring of the run's `model` string: model
 # strings are exact, dated/versioned IDs with no normalization anywhere in
@@ -70,6 +81,7 @@ def estimate_cost(
     input_tokens: int,
     output_tokens: int,
     cached_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
 ) -> Optional[EstimatedCost]:
     model_lower = model.lower()
 
@@ -85,6 +97,8 @@ def estimate_cost(
         return None
 
     input_usd = input_tokens / 1_000_000 * price.input_per_1m_usd
-    cached_usd = cached_input_tokens / 1_000_000 * price.input_per_1m_usd * CACHE_READ_MULTIPLIER
+    cache_read_usd = cached_input_tokens / 1_000_000 * price.input_per_1m_usd * CACHE_READ_MULTIPLIER
+    cache_write_usd = cache_creation_input_tokens / 1_000_000 * price.input_per_1m_usd * CACHE_WRITE_MULTIPLIER
+    total_input_usd = input_usd + cache_read_usd + cache_write_usd
     output_usd = output_tokens / 1_000_000 * price.output_per_1m_usd
-    return EstimatedCost(input_usd + cached_usd, output_usd, input_usd + cached_usd + output_usd)
+    return EstimatedCost(total_input_usd, output_usd, total_input_usd + output_usd)

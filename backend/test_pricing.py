@@ -77,6 +77,36 @@ def test_cached_input_tokens_default_to_zero():
     assert with_cache == without_cache_arg
 
 
+def test_cache_creation_input_tokens_priced_at_125_percent_of_input_rate():
+    # sonnet's input rate is $3/MTok, so 1M cache-write tokens should cost
+    # $3.75 (1.25x, a premium not a discount), folded into input_usd.
+    result = estimate_cost(
+        "anthropic", "claude-sonnet-4-5-20250929", 0, 0,
+        cached_input_tokens=0, cache_creation_input_tokens=1_000_000,
+    )
+    assert result is not None
+    assert round(result.input_usd, 4) == 3.75
+    assert round(result.total_usd, 4) == 3.75
+
+
+def test_cache_read_and_cache_write_costs_both_fold_into_input_usd():
+    result = estimate_cost(
+        "anthropic", "claude-sonnet-4-5-20250929", 1000, 500,
+        cached_input_tokens=1_000_000, cache_creation_input_tokens=1_000_000,
+    )
+    assert result is not None
+    # fresh: 1000/1e6*3 = 0.003; cache read: 1e6/1e6*3*0.1 = 0.3; cache write: 1e6/1e6*3*1.25 = 3.75
+    assert round(result.input_usd, 4) == round(0.003 + 0.3 + 3.75, 4)
+    assert round(result.output_usd, 4) == round(500 / 1_000_000 * 15, 4)
+    assert round(result.total_usd, 4) == round(result.input_usd + result.output_usd, 4)
+
+
+def test_cache_creation_input_tokens_defaults_to_zero():
+    with_default = estimate_cost("anthropic", "claude-sonnet-4-5-20250929", 1000, 0)
+    explicit_zero = estimate_cost("anthropic", "claude-sonnet-4-5-20250929", 1000, 0, 0, 0)
+    assert with_default == explicit_zero
+
+
 def test_matching_is_case_insensitive():
     result = estimate_cost("anthropic", "Claude-SONNET-4-5-20250929", 1_000_000, 1_000_000)
     assert result is not None

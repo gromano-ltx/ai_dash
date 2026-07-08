@@ -55,6 +55,7 @@ def parse_transcript_content(
     input_tokens = 0
     output_tokens = 0
     cached_input_tokens = 0
+    cache_creation_input_tokens = 0
 
     # Extract agentId and parent linkage from first event if not provided by caller
     if not agent_id and events:
@@ -117,6 +118,7 @@ def parse_transcript_content(
                 input_tokens += usage.get('input_tokens', 0)
                 output_tokens += usage.get('output_tokens', 0)
                 cached_input_tokens += usage.get('cache_read_input_tokens', 0)
+                cache_creation_input_tokens += usage.get('cache_creation_input_tokens', 0)
 
             content = msg.get('content', [])
             if isinstance(content, list):
@@ -169,7 +171,11 @@ def parse_transcript_content(
         git_prs=list(dict.fromkeys(git_prs)),
         ticket_refs=ticket_refs,
         parent_id=parent_id,
-        meta={"git_branch": git_branch, "cwd": cwd, "github_repo": github_repo, "cached_input_tokens": cached_input_tokens},
+        meta={
+            "git_branch": git_branch, "cwd": cwd, "github_repo": github_repo,
+            "cached_input_tokens": cached_input_tokens,
+            "cache_creation_input_tokens": cache_creation_input_tokens,
+        },
     )
 
 
