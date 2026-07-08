@@ -107,14 +107,14 @@ function UsersSection({ isBootstrap, isAdmin }: { isBootstrap: boolean; isAdmin:
   if (isBootstrap && bootstrapped) {
     return (
       <section>
-        <h2 className="text-xs text-slate-500 font-mono uppercase tracking-wider mb-3">Users</h2>
-        <div className="bg-slate-800 border border-emerald-500/30 text-emerald-300 font-mono text-xs p-3 rounded">
+        <h2 className="text-xs font-sans text-ledger-faint uppercase tracking-wider mb-3">Users</h2>
+        <div className="bg-ledger-raised border-l-2 border-provider-openai text-provider-openai font-mono text-xs p-3">
           Account created. The shared dashboard password no longer works — sign in with this
           account to continue.
         </div>
         <button
           onClick={() => { window.location.href = "/login"; }}
-          className="mt-3 px-3 py-1.5 rounded text-sm bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors font-mono"
+          className="mt-3 px-3 py-1.5 text-sm bg-ledger-raised text-ledger-ink hover:bg-ledger-rule transition-colors font-sans"
         >
           Go to login
         </button>
@@ -124,7 +124,7 @@ function UsersSection({ isBootstrap, isAdmin }: { isBootstrap: boolean; isAdmin:
 
   return (
     <section>
-      <h2 className="text-xs text-slate-500 font-mono uppercase tracking-wider mb-3">Users</h2>
+      <h2 className="text-xs font-sans text-ledger-faint uppercase tracking-wider mb-3">Users</h2>
 
       {(isBootstrap || isAdmin) && (
         <div className="flex gap-2 mb-4">
@@ -133,7 +133,7 @@ function UsersSection({ isBootstrap, isAdmin }: { isBootstrap: boolean; isAdmin:
             placeholder="username"
             value={newUsername}
             onChange={(e) => setNewUsername(e.target.value)}
-            className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 font-mono focus:outline-none focus:border-slate-500"
+            className="flex-1 bg-ledger-raised border border-ledger-rule px-3 py-1.5 text-sm text-ledger-ink placeholder-ledger-faint font-mono focus:outline-none focus:border-ledger-faint"
           />
           <input
             type="password"
@@ -141,26 +141,26 @@ function UsersSection({ isBootstrap, isAdmin }: { isBootstrap: boolean; isAdmin:
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-            className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 font-mono focus:outline-none focus:border-slate-500"
+            className="flex-1 bg-ledger-raised border border-ledger-rule px-3 py-1.5 text-sm text-ledger-ink placeholder-ledger-faint font-mono focus:outline-none focus:border-ledger-faint"
           />
           <button
             onClick={handleCreate}
             disabled={loading || !newUsername.trim() || !newPassword}
-            className="px-3 py-1.5 rounded text-sm bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-mono"
+            className="px-3 py-1.5 text-sm bg-ledger-raised text-ledger-ink hover:bg-ledger-rule disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-sans"
           >
             Create Account
           </button>
         </div>
       )}
 
-      {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+      {error && <p className="text-xs font-mono text-ledger-accent mb-3">{error}</p>}
 
       {!isBootstrap && (
-        <div className="border border-slate-800 rounded overflow-hidden">
+        <div className="border border-ledger-rule overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[480px] text-sm font-mono">
               <thead>
-                <tr className="border-b border-slate-800 text-xs text-slate-500 uppercase tracking-wider">
+                <tr className="border-b border-ledger-rule text-xs font-sans text-ledger-faint uppercase tracking-wider">
                   <th className="px-4 py-2 text-left font-normal">Username</th>
                   <th className="px-4 py-2 text-left font-normal">Admin</th>
                   <th className="px-4 py-2 text-left font-normal">Created</th>
@@ -170,25 +170,25 @@ function UsersSection({ isBootstrap, isAdmin }: { isBootstrap: boolean; isAdmin:
               <tbody>
                 {accounts.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-4 text-center text-slate-600 text-xs">No accounts yet</td>
+                    <td colSpan={4} className="px-4 py-4 text-center text-ledger-faint text-xs">No accounts yet</td>
                   </tr>
                 ) : (
                   accounts.map((a) => (
-                    <tr key={a.username} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-800/30">
-                      <td className="px-4 py-2.5 text-slate-300">{a.username}</td>
+                    <tr key={a.username} className="border-b border-ledger-rule/50 last:border-0 hover:bg-ledger-raised/60">
+                      <td className="px-4 py-2.5 text-ledger-ink">{a.username}</td>
                       <td className="px-4 py-2.5">
                         <button
                           onClick={() => handleToggleAdmin(a)}
-                          className={a.is_admin ? "text-emerald-400" : "text-slate-600 hover:text-slate-400"}
+                          className={a.is_admin ? "text-provider-openai" : "text-ledger-faint hover:text-ledger-dim"}
                         >
                           {a.is_admin ? "admin" : "member"}
                         </button>
                       </td>
-                      <td className="px-4 py-2.5 text-slate-500">{formatDate(a.created_at)}</td>
+                      <td className="px-4 py-2.5 text-ledger-faint">{formatDate(a.created_at)}</td>
                       <td className="px-4 py-2.5 text-right">
                         <button
                           onClick={() => handleDelete(a.username)}
-                          className="text-slate-600 hover:text-red-400 transition-colors px-1"
+                          className="text-ledger-faint hover:text-ledger-accent transition-colors px-1"
                           title="Delete account"
                         >
                           ×
@@ -275,7 +275,7 @@ function ApiKeysSection() {
 
   return (
     <section>
-      <h2 className="text-xs text-slate-500 font-mono uppercase tracking-wider mb-3">API Keys</h2>
+      <h2 className="text-xs font-sans text-ledger-faint uppercase tracking-wider mb-3">API Keys</h2>
 
       <div className="flex gap-2 mb-4">
         <input
@@ -284,39 +284,39 @@ function ApiKeysSection() {
           value={newUser}
           onChange={(e) => setNewUser(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-          className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 font-mono focus:outline-none focus:border-slate-500"
+          className="flex-1 bg-ledger-raised border border-ledger-rule px-3 py-1.5 text-sm text-ledger-ink placeholder-ledger-faint font-mono focus:outline-none focus:border-ledger-faint"
         />
         <button
           onClick={handleCreate}
           disabled={loading || !newUser.trim()}
-          className="px-3 py-1.5 rounded text-sm bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-mono"
+          className="px-3 py-1.5 text-sm bg-ledger-raised text-ledger-ink hover:bg-ledger-rule disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-sans"
         >
           Create Key
         </button>
       </div>
 
-      {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+      {error && <p className="text-xs font-mono text-ledger-accent mb-3">{error}</p>}
 
       {createdKey && (
-        <div className="mb-4 bg-slate-800 border border-emerald-500/30 text-emerald-300 font-mono text-xs p-3 rounded">
+        <div className="mb-4 bg-ledger-raised border-l-2 border-provider-openai text-provider-openai font-mono text-xs p-3">
           <div className="flex items-center justify-between gap-3">
             <span className="break-all">{createdKey}</span>
             <button
               onClick={() => navigator.clipboard.writeText(createdKey)}
-              className="shrink-0 px-2 py-1 rounded bg-emerald-900/40 hover:bg-emerald-900/70 transition-colors"
+              className="shrink-0 px-2 py-1 bg-ledger-rule hover:bg-ledger-rule/70 transition-colors"
             >
               Copy
             </button>
           </div>
-          <p className="mt-2 text-emerald-500/70">This key is only shown once.</p>
+          <p className="mt-2 opacity-70">This key is only shown once.</p>
         </div>
       )}
 
-      <div className="border border-slate-800 rounded overflow-hidden">
+      <div className="border border-ledger-rule overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[480px] text-sm font-mono">
           <thead>
-            <tr className="border-b border-slate-800 text-xs text-slate-500 uppercase tracking-wider">
+            <tr className="border-b border-ledger-rule text-xs font-sans text-ledger-faint uppercase tracking-wider">
               <th className="px-4 py-2 text-left font-normal">Key Prefix</th>
               <th className="px-4 py-2 text-left font-normal">User</th>
               <th className="px-4 py-2 text-left font-normal">Created</th>
@@ -326,18 +326,18 @@ function ApiKeysSection() {
           <tbody>
             {keys.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-4 text-center text-slate-600 text-xs">No keys yet</td>
+                <td colSpan={4} className="px-4 py-4 text-center text-ledger-faint text-xs">No keys yet</td>
               </tr>
             ) : (
               keys.map((k) => (
-                <tr key={k.key_prefix} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-800/30">
-                  <td className="px-4 py-2.5 text-slate-400">{k.key_prefix}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{k.user}</td>
-                  <td className="px-4 py-2.5 text-slate-500">{formatDate(k.created_at)}</td>
+                <tr key={k.key_prefix} className="border-b border-ledger-rule/50 last:border-0 hover:bg-ledger-raised/60">
+                  <td className="px-4 py-2.5 text-ledger-dim">{k.key_prefix}</td>
+                  <td className="px-4 py-2.5 text-ledger-ink">{k.user}</td>
+                  <td className="px-4 py-2.5 text-ledger-faint">{formatDate(k.created_at)}</td>
                   <td className="px-4 py-2.5 text-right">
                     <button
                       onClick={() => handleDelete(k)}
-                      className="text-slate-600 hover:text-red-400 transition-colors px-1"
+                      className="text-ledger-faint hover:text-ledger-accent transition-colors px-1"
                       title="Delete key"
                     >
                       ×
@@ -361,14 +361,14 @@ export function Settings() {
 
   return (
     <div className="p-6 max-w-2xl space-y-8">
-      <h1 className="text-lg font-mono font-semibold text-slate-100">Settings</h1>
+      <h1 className="text-lg font-sans font-semibold text-ledger-ink">Settings</h1>
 
       {(isBootstrap || isAdmin) && <UsersSection isBootstrap={isBootstrap} isAdmin={isAdmin} />}
 
       {isAdmin && <ApiKeysSection />}
 
       {!isBootstrap && !isAdmin && (
-        <p className="text-sm text-slate-500">Only admins can manage users and API keys.</p>
+        <p className="text-sm font-sans text-ledger-faint">Only admins can manage users and API keys.</p>
       )}
     </div>
   );

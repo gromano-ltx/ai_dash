@@ -148,11 +148,19 @@ def test_parse_transcript_content_uses_model_from_gemini_event():
     assert run.model == "gemini-3.5-flash"
 
 
-def test_parse_transcript_content_sums_input_tokens_across_turns():
+def test_parse_transcript_content_sums_new_input_tokens_excluding_cached():
     run = parse_transcript_content(_sample_session())
-    # 100 (turn 1, deduped) + 150 (turn 2) = 250 — NOT 100+100+150=350, which
-    # would double-count the verified real duplicate-line case.
-    assert run.input_tokens == 250
+    # Turn 1 (deduped): input=100, cached=0 → new=100. Turn 2: input=150,
+    # cached=50 → new=100. Total: 200 — NOT 250 (which would include turn 2's
+    # cached tokens), and NOT 100+100+150=350 (which would double-count the
+    # verified real duplicate-line case for turn 1).
+    assert run.input_tokens == 200
+
+
+def test_parse_transcript_content_captures_cached_input_tokens_in_meta():
+    run = parse_transcript_content(_sample_session())
+    # Turn 1 cached=0 (deduped despite the duplicate line), turn 2 cached=50.
+    assert run.meta["cached_input_tokens"] == 50
 
 
 def test_parse_transcript_content_sums_output_plus_thoughts_plus_tool():

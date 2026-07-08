@@ -55,6 +55,44 @@ def _add_missing_columns():
             logger.info(f"[db] added agent_runs.{column} column")
 
 
+def _backfill_cached_input_tokens(session: Session):
+    """One-time backfill: recompute input_tokens/meta.cached_input_tokens for
+    rows ingested before AI-54's fix, by re-parsing their stored transcript
+    content with the corrected adapter logic. Only these two fields are
+    touched — status/started_at/ended_at/label etc. on the existing row are
+    left exactly as they are; a fresh re-parse can't reliably reconstruct
+    those (e.g. it has no access to the original file's mtime), but
+    input_tokens/meta are fully and correctly derivable from the stored
+    transcript content alone. Gemini rows are skipped — no real ones existed
+    at the time of this fix, so nothing to backfill there.
+    """
+    from backend.adapters import claude_code, codex
+    from backend.models import AgentRun, TranscriptStore
+
+    parsers = {"openai": codex.parse_transcript_content, "anthropic": claude_code.parse_transcript_content}
+    rows = session.exec(
+        select(AgentRun).where(AgentRun.provider.in_(list(parsers.keys())))
+    ).all()
+    migrated = 0
+    for run in rows:
+        if isinstance(run.meta, dict) and "cached_input_tokens" in run.meta:
+            continue  # already migrated
+        stored = session.get(TranscriptStore, run.id)
+        if not stored:
+            continue
+        parse_fn = parsers[run.provider]
+        reparsed = parse_fn(stored.content)
+        if not reparsed:
+            continue
+        run.input_tokens = reparsed.input_tokens
+        run.meta = reparsed.meta
+        session.add(run)
+        migrated += 1
+    if migrated:
+        session.commit()
+        print(f"[db] backfilled cached_input_tokens for {migrated} runs")
+
+
 def get_session():
     with Session(engine) as session:
         yield session
@@ -63,6 +101,7 @@ def get_session():
 def _seed():
     from sqlalchemy import text
     from backend.models import AgentRun, ApiKey
+    from backend.watcher import MIN_TOKENS_TO_PERSIST
     with Session(engine) as session:
         if not session.exec(select(ApiKey)).first():
             key = ApiKey(key="adk_devkey_local", user="Gabby")
@@ -79,7 +118,7 @@ def _seed():
             # Remove zero-token stubs, system-prompt-labeled sub-agents, and trivial micro-sessions
             deleted = session.exec(text(
                 "DELETE FROM agent_runs WHERE "
-                "(input_tokens + output_tokens < 150) OR "
+                f"(input_tokens + output_tokens < {MIN_TOKENS_TO_PERSIST}) OR "
                 "(label LIKE 'You are %')"
             ))
             session.commit()
@@ -154,12 +193,16 @@ def _seed():
                     session.add(r)
                 session.commit()
                 print(f"[db] backfilled ended_at for {len(stuck)} runs stuck done with null duration")
+            _backfill_cached_input_tokens(session)
             # One-time backfill: existing rows already have model/input_tokens/
             # output_tokens stored, so cost can be computed retroactively,
             # unlike the ended_at backfill above where the source data for old
             # rows didn't exist. Only touches rows where estimated_cost_usd is
             # still NULL, so it's naturally idempotent and self-heals rows
             # whose model tier gets added to PRICING after they were ingested.
+            # Runs *after* _backfill_cached_input_tokens so cost is computed
+            # from the corrected (cache-excluded) input_tokens, not the stale
+            # pre-AI-54 value.
             from backend.pricing import estimate_cost
 
             uncosted = session.exec(

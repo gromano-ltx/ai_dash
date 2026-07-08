@@ -81,6 +81,7 @@ def parse_transcript_content(
 
     input_tokens = 0
     output_tokens = 0
+    cached_input_tokens = 0
 
     # Real sessions on this machine log the same message id twice in a row (a
     # debounced-write artifact of the checkpoint format) — dedupe before
@@ -115,7 +116,9 @@ def parse_transcript_content(
         elif etype == 'gemini':
             model = event.get('model') or model
             tokens = event.get('tokens') or {}
-            input_tokens += tokens.get('input', 0)
+            cached = tokens.get('cached', 0)
+            input_tokens += max(tokens.get('input', 0) - cached, 0)
+            cached_input_tokens += cached
             output_tokens += (
                 tokens.get('output', 0) + tokens.get('thoughts', 0) + tokens.get('tool', 0)
             )
@@ -176,5 +179,5 @@ def parse_transcript_content(
         git_prs=list(dict.fromkeys(git_prs)),
         ticket_refs=ticket_refs,
         parent_id=parent_id,
-        meta={"git_branch": None, "cwd": None, "github_repo": github_repo},
+        meta={"git_branch": None, "cwd": None, "github_repo": github_repo, "cached_input_tokens": cached_input_tokens},
     )
