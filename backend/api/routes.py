@@ -262,6 +262,9 @@ def get_stats(
         "total_output_tokens_7d": sum(r.output_tokens for r in recent),
         "total_commits_7d": sum(len(r.git_commits) for r in recent),
         "total_prs_7d": sum(len(r.git_prs) for r in recent),
+        "total_cost_usd": sum(
+            r.estimated_cost_usd for r in recent if r.estimated_cost_usd is not None
+        ),
         "days": days,
         "active_providers": list({r.provider for r in recent}),
         "running_count": sum(1 for r in runs if r.status == "running"),
