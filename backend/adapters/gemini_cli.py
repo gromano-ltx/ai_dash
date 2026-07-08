@@ -161,7 +161,7 @@ def parse_transcript_content(
 
     label = (first_user_text or "")[:80] or "Gemini CLI session"
     search_text = ' '.join(filter(None, [first_user_text, label] + bash_commands))
-    ticket_refs = _extract_tickets(search_text)
+    ticket_refs = _extract_tickets(search_text, git_prs)
 
     return AgentRun(
         id=run_id,

@@ -1,7 +1,7 @@
 from sqlalchemy.pool import StaticPool
 from sqlmodel import create_engine, Session, SQLModel
 
-from backend.db import _backfill_cached_input_tokens
+from backend.db import _backfill_cached_input_tokens, _backfill_ticket_refs
 from backend.models import AgentRun, TranscriptStore
 
 
@@ -168,3 +168,86 @@ def test_backfill_ignores_gemini_rows():
         run = session.get(AgentRun, "gemini-run-1")
         assert run.input_tokens == 777
         assert "cached_input_tokens" not in (run.meta or {})
+
+
+def _claude_code_transcript_with_pr_self_reference() -> str:
+    """A minimal Claude Code transcript where the first user message reads
+    like a squash-merge commit message ("... #40 ...") for a PR that's also
+    opened via `gh pr create` — the exact shape _extract_tickets used to
+    misfile as a ticket ref, duplicating what's already in git_prs."""
+    import json
+
+    lines = [
+        json.dumps({
+            "type": "user", "isMeta": True, "sessionId": "claude-run-2",
+            "gitBranch": "main", "cwd": "/repo", "timestamp": "2026-04-16T16:00:00.000Z",
+        }),
+        json.dumps({
+            "type": "user", "sessionId": "claude-run-2", "timestamp": "2026-04-16T16:00:05.000Z",
+            "message": {"content": "Merge pull request #40 from foo"},
+        }),
+        json.dumps({
+            "type": "assistant", "sessionId": "claude-run-2", "timestamp": "2026-04-16T16:01:00.000Z",
+            "requestId": "req-1",
+            "message": {
+                "model": "claude-sonnet-4-6",
+                "usage": {"input_tokens": 5, "output_tokens": 10},
+                "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash",
+                             "input": {"command": "gh pr create --title x"}}],
+            },
+        }),
+        json.dumps({
+            "type": "user", "sessionId": "claude-run-2", "timestamp": "2026-04-16T16:01:05.000Z",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_1",
+                                      "content": "https://github.com/gromano-ltx/ai_dash/pull/40"}]},
+        }),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def test_backfill_ticket_refs_removes_pr_self_reference():
+    engine = _make_engine()
+    with Session(engine) as session:
+        session.add(AgentRun(
+            id="claude-run-2", provider="anthropic", model="claude-sonnet-4-6",
+            ticket_refs=["#40"], git_prs=["https://github.com/gromano-ltx/ai_dash/pull/40"],
+        ))
+        session.add(TranscriptStore(session_id="claude-run-2", content=_claude_code_transcript_with_pr_self_reference()))
+        session.commit()
+
+        _backfill_ticket_refs(session)
+
+        run = session.get(AgentRun, "claude-run-2")
+        assert run.ticket_refs == []
+        # Only ticket_refs is touched.
+        assert run.git_prs == ["https://github.com/gromano-ltx/ai_dash/pull/40"]
+
+
+def test_backfill_ticket_refs_is_idempotent_and_skips_unchanged_rows():
+    engine = _make_engine()
+    with Session(engine) as session:
+        session.add(AgentRun(
+            id="claude-run-2", provider="anthropic", model="claude-sonnet-4-6",
+            ticket_refs=[],
+        ))
+        session.add(TranscriptStore(session_id="claude-run-2", content=_claude_code_transcript_with_pr_self_reference()))
+        session.commit()
+
+        _backfill_ticket_refs(session)  # already matches reparsed value — no-op
+
+        run = session.get(AgentRun, "claude-run-2")
+        assert run.ticket_refs == []
+
+
+def test_backfill_ticket_refs_skips_rows_with_missing_transcript():
+    engine = _make_engine()
+    with Session(engine) as session:
+        session.add(AgentRun(
+            id="orphan-2", provider="openai", model="m", ticket_refs=["#99"],
+        ))
+        session.commit()
+
+        _backfill_ticket_refs(session)  # must not raise
+
+        run = session.get(AgentRun, "orphan-2")
+        assert run.ticket_refs == ["#99"]

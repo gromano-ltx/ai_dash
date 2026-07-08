@@ -151,7 +151,7 @@ def parse_transcript_content(
     ended_at = last_assistant_ts if status == "done" else None
 
     search_text = ' '.join(filter(None, [git_branch, first_user_text, label] + bash_commands))
-    ticket_refs = _extract_tickets(search_text)
+    ticket_refs = _extract_tickets(search_text, git_prs)
 
     return AgentRun(
         id=run_id,

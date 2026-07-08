@@ -40,11 +40,11 @@ export function RunDetail() {
               const url = ticketUrl(t);
               return url ? (
                 <a key={t} href={url} target="_blank" rel="noopener noreferrer"
-                  className="text-xs font-mono uppercase tracking-wider text-ledger-accent border-b border-ledger-accent/50 hover:border-ledger-accent transition-colors pb-0.5">
+                  className="text-xs font-mono uppercase tracking-wider text-ledger-accent hover:underline">
                   {t}
                 </a>
               ) : (
-                <span key={t} className="text-xs font-mono uppercase tracking-wider text-ledger-accent border-b border-ledger-accent/50 pb-0.5">
+                <span key={t} className="text-xs font-mono uppercase tracking-wider text-ledger-faint">
                   {t}
                 </span>
               );
