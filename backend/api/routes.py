@@ -222,7 +222,10 @@ def get_daily(
 ):
     runs = _visible_runs(session, current_user)
     cutoff = datetime.utcnow() - timedelta(days=days)
-    recent = [r for r in runs if r.started_at >= cutoff]
+    # A still-running session stays "recent" regardless of how long ago it
+    # started — otherwise a long-running session eventually ages out of a
+    # short window while it's still actively accumulating tokens right now.
+    recent = [r for r in runs if r.started_at >= cutoff or r.status == "running"]
     if user:
         recent = [r for r in recent if r.user == user]
     # Bucket by full ISO date internally so dates a year+ apart that share
@@ -235,7 +238,13 @@ def get_daily(
         buckets[key] = {"date": day.strftime("%m/%d"), "anthropic": 0, "openai": 0, "gemini": 0,
                         "input_tokens": 0, "output_tokens": 0}
     for r in recent:
-        key = r.started_at.strftime("%Y-%m-%d")
+        # A running session's token count keeps growing after it started, so
+        # attribute its (whole, current) activity to today rather than its
+        # start day — otherwise a multi-day session vanishes from the chart
+        # the moment it's no longer "new", even while it's actively running.
+        # Once it finishes, it settles permanently on its start day below.
+        bucket_date = datetime.utcnow() if r.status == "running" else r.started_at
+        key = bucket_date.strftime("%Y-%m-%d")
         if key in buckets:
             buckets[key][r.provider] = buckets[key].get(r.provider, 0) + 1
             buckets[key]["input_tokens"] += r.input_tokens
@@ -252,7 +261,10 @@ def get_stats(
 ):
     runs = _visible_runs(session, current_user)
     cutoff = datetime.utcnow() - timedelta(days=days)
-    recent = [r for r in runs if r.started_at >= cutoff]
+    # See /daily's identical comment: a still-running session stays "recent"
+    # regardless of start date, so it doesn't silently drop out of the
+    # window's totals while it's actively accumulating tokens right now.
+    recent = [r for r in runs if r.started_at >= cutoff or r.status == "running"]
     if user:
         runs = [r for r in runs if r.user == user]
         recent = [r for r in recent if r.user == user]
