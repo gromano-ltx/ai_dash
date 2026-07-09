@@ -53,8 +53,10 @@ Build a read-only observability dashboard for AI agents across three providers: 
   │  GET/POST/DELETE/PATCH /accounts  (admin-managed users)       │
   │                            │                               │
   │  GET /api/runs  /api/stats  /api/daily  /api/providers      │
-  │    (scoped: non-admin sees own runs only, admin sees all)    │
+  │    (scoped: non-admin sees own runs only, admin sees all;    │
+  │     /api/stats includes estimated $ cost, see AI-5)          │
   │  SSE /api/stream  (live push, same per-user scoping)          │
+  │  DELETE /api/runs  (admin-only, batch + cascade + dry_run)    │
   │  GET/POST/DELETE /keys  (API keys, admin-only)               │
   └──────────────────────────┬──────────────────────────────────┘
                              │  REST + SSE (session cookie)
@@ -107,11 +109,11 @@ The collector watches `~/.claude/projects/*.jsonl`, detects changes, and ships u
 
 | Layer | Choice | Reason |
 |---|---|---|
-| Frontend | Vite + React 18 + TypeScript | Fast, lightweight, no SSR overhead needed |
+| Frontend | Vite + React 19 + TypeScript | Fast, lightweight, no SSR overhead needed |
 | Styling | Tailwind CSS | Utility-first, pairs well with component libs |
 | Data fetching | TanStack Query | Caching, background refresh, SSE integration |
 | Charts | Recharts | Composable, React-native, small bundle |
-| Tables | TanStack Table | Headless, high-perf virtual rows for large run lists |
+| Tables | Plain paginated table | Offset pagination is enough at current run volumes |
 | Backend | FastAPI + Python 3.12 | Native AI SDK support, great SSE/async |
 | DB | PostgreSQL via SQLModel | Cloud SQL on GCP, smallest instance (~$10/mo), fully managed |
 | Real-time | Server-Sent Events (SSE) | One-way stream from backend → frontend for live runs |
@@ -137,10 +139,28 @@ class AgentRun:
     git_prs: list[str]              # PR URLs opened during this run
     ticket_refs: list[str]          # e.g. ["LINEAR-123", "#456", "PROJ-789"]
     parent_id: str | None           # for nested trace trees
-    metadata: dict                  # provider-specific extras
+    metadata: dict                  # provider-specific extras, incl. cached_input_tokens (see below)
+    estimated_input_cost_usd: float | None   # see Cost tracking below
+    estimated_output_cost_usd: float | None
+    estimated_cost_usd: float | None
 ```
 
-> **Cost omitted for v1**: no provider API reliably exposes billing data at the run level. Will be added later.
+### Token accounting
+
+`input_tokens` excludes cached (prompt-cache-read) tokens for all three providers; each provider's
+adapter subtracts the cached portion from what the transcript reports, since that portion is billed
+at a discount rather than full price and would otherwise inflate a long session's apparent cost.
+`meta.cached_input_tokens` captures that excluded portion separately.
+
+### Cost tracking (AI-5)
+
+`backend/pricing.py` maps `(provider, model)` to a hardcoded $/1M-token price via case-insensitive
+tier-keyword substring matching (e.g. any Anthropic model string containing `"sonnet"`), so pricing
+survives new dated model releases without a code change. Computed once at ingest (`_upsert()`) and
+recomputed on every update; a one-time startup backfill computes it for historical rows too. A run
+whose model doesn't match any known tier gets `null` for all three cost fields rather than a guessed
+price. Cache-read and cache-write (`cache_creation_input_tokens`) tokens are priced too, at their
+respective discount/premium rates, not just fresh input tokens.
 
 ### Activity Timeline (Claude Code via MCP)
 Claude Code streams events to the MCP server during each session. The MCP adapter extracts:
@@ -176,16 +196,18 @@ Claude Code streams events to the MCP server during each session. The MCP adapte
 ## Backend Routes
 
 ```
-GET  /api/runs              # paginated list, filterable by provider/status/user/ticket/date (scoped per-user)
-GET  /api/runs/:id          # single run detail (scoped per-user)
-GET  /api/stats             # 7-day summary (runs, tokens, commits, PRs, by provider), scoped per-user
-GET  /api/daily             # per-day breakdown for charts (scoped per-user)
-GET  /api/providers         # active providers
-GET  /api/users             # users seen in runs (scoped per-user)
-GET  /api/stream            # SSE stream of live run events (scoped per-user)
-POST /api/v1/ingest         # collector ships raw JSONL transcript here (X-API-Key auth, unchanged)
-GET  /collector.py          # collector script download
-GET  /install.sh            # one-command install script
+GET    /api/runs            # paginated list, filterable by provider/status/user/ticket/date (scoped per-user)
+GET    /api/runs/:id        # single run detail (scoped per-user)
+DELETE /api/runs            # batch delete by id, with cascade to sub-agent children,
+                            #   dry_run mode, and audit logging (admin-only, max 100 ids/request)
+GET    /api/stats           # 7-day summary (runs, tokens, commits, PRs, estimated $ cost, by provider), scoped per-user
+GET    /api/daily           # per-day breakdown for charts (scoped per-user)
+GET    /api/providers       # active providers
+GET    /api/users           # users seen in runs (scoped per-user)
+GET    /api/stream          # SSE stream of live run events (scoped per-user)
+POST   /api/v1/ingest       # collector ships raw JSONL transcript here (X-API-Key auth, unchanged)
+GET    /collector.py        # collector script download
+GET    /install.sh          # one-command install script
 
 POST   /api/login           # username + password → sets signed session cookie (30d expiry)
 POST   /api/logout          # clears session cookie
@@ -208,14 +230,16 @@ DELETE /api/keys/:key_prefix    # revoke API key (admin-only)
 - Rendered outside the main `<Layout>` (no sidebar/nav)
 
 ### `/`: Overview Dashboard
-- Summary cards: total runs (7d), total tokens (7d), active providers, commits/PRs made
-- Sparkline: runs-per-day per provider
-- Recent runs list (last 10)
+- Time range selector: 24h / 7d / 30d / 90d / All
+- Summary cards: total runs, total tokens, commits, PRs opened, estimated $ spend (see AI-5)
+- Live indicator badge when runs are currently in progress
+- Charts: runs-per-day and token burn-per-day, stacked by provider
+- Provider breakdown: runs/tokens/commits per provider
 
 ### `/runs`: All Runs Table
-- TanStack Table with virtual rows (handles thousands of runs)
-- Filter by: provider, model, status, user, ticket, date range
-- Columns: label, provider, model, user, status, duration, tokens, ticket, commits, PRs, started_at
+- Offset-based pagination (50 rows/page)
+- Filter by: provider, status, user (admin-only filter), ticket
+- Columns: task, provider, model, user, status, duration, tokens, ticket, code (merged PR/commit links)
 
 ### `/runs/:id`: Run Detail
 - Header: user, model, duration, status badge, ticket chip(s) (linked to ticket system)
@@ -255,6 +279,7 @@ ai_dash/
 │   │   ├── routes.py        # runs/stats/daily/providers/users/keys/ingest/stream
 │   │   └── auth_routes.py   # login/logout/me/accounts CRUD
 │   ├── auth.py               # password hashing, session tokens, auth dependencies
+│   ├── pricing.py            # model pricing table + cost estimation (AI-5)
 │   ├── models.py
 │   ├── db.py
 │   └── main.py
@@ -279,7 +304,7 @@ ai_dash/
 11. ✅ Gemini adapter: Gemini CLI transcript parser, same shape as Claude Code (AI-47)
 12. ✅ Multi-user data model: `user` field on `AgentRun`/`ApiKey`; initial client-side filter dropdown (later replaced by real per-user auth in AI-7)
 13. ✅ API key management UI: Settings page with create/copy/delete (now admin-only, see AI-7)
-14. ⬜ Cost tracking: estimate $ spend from token counts × model pricing table; show on dashboard + run detail (AI-5)
+14. ✅ Cost tracking: estimated $ spend from token counts × model pricing table (incl. cache read/write pricing), shown on dashboard + run detail (AI-5)
 15. ✅ Installer: `install.sh` one-liner; launchd/systemd service setup (AI-6)
 16. ⬜ Clickable links: PR URLs, GitHub commit links, and ticket refs (Linear / Jira) in run list and detail; prefer PR over bare commit; fall back to commit URL constructed from git remote; ticket URL from configured org base URL in Settings (AI-8)
 17. ✅ Auth: per-user accounts, session-cookie login, and per-user data scoping, replacing the shared dashboard password (AI-7). `DASHBOARD_PASSWORD` remains as a one-way fallback until the first account is created.
@@ -291,7 +316,6 @@ ai_dash/
 
 ## Out of Scope (v1)
 
-- Cost / billing data
 - All desktop apps (Claude, Gemini)
 - Mobile apps
 - Control plane (stop/retry agents)
