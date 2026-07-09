@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from sqlmodel import Session
 
 import backend.db as db_module
@@ -53,3 +55,30 @@ def test_stats_total_cost_is_zero_when_no_runs_have_cost(test_client, monkeypatc
     res = test_client.get("/api/stats")
     assert res.status_code == 200
     assert res.json()["total_cost_usd"] == 0
+
+
+def test_running_session_stays_in_totals_outside_its_own_start_window(test_client, monkeypatch):
+    # A session that started before the requested window but is still
+    # running must not silently drop out of the window's totals — it's
+    # actively accumulating tokens/cost right now.
+    import backend.api.auth_routes as auth_routes_module
+    monkeypatch.setattr(auth_routes_module, "_COOKIE_SECURE", False)
+
+    ancient_start = datetime.utcnow() - timedelta(days=10)
+    with Session(db_module.engine) as session:
+        session.add(User(username="dave", password_hash=hash_password("w"), is_admin=True))
+        session.add(AgentRun(
+            id="running-ancient-start", provider="anthropic", model="claude-sonnet-5",
+            status="running", started_at=ancient_start,
+            input_tokens=1000, output_tokens=2000,
+            estimated_cost_usd=5.00, user="dave",
+        ))
+        session.commit()
+
+    _login(test_client, "dave", "w")
+    res = test_client.get("/api/stats?days=3")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total_runs_7d"] == 1
+    assert body["total_input_tokens_7d"] == 1000
+    assert body["total_cost_usd"] == 5.00
