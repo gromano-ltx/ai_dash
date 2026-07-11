@@ -1,3 +1,6 @@
+import logging
+
+from sqlalchemy import text
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -369,3 +372,33 @@ def test_backfill_is_idempotent(test_client):
         ).one().estimated_cost_usd
 
     assert first_pass == second_pass == 18.00
+
+
+def test_seed_cleanup_logs_instead_of_silently_swallowing_exception(test_client, caplog):
+    # AI-20 regression guard: the malformed-data cleanup loop in _seed() used
+    # to wrap Postgres-only SQL in a bare `except` that silently rolled back
+    # on SQLite, so the cleanup never actually ran and nobody found out. It
+    # now catches broadly (row data can be arbitrarily malformed) but must
+    # always log via logger.exception rather than passing silently. Force a
+    # real failure in that exact loop by corrupting git_commits with a JSON
+    # scalar via raw SQL (bypassing model validation) so iterating over it
+    # raises TypeError, then assert the failure is actually logged.
+    with Session(db_module.engine) as session:
+        # input/output tokens set above MIN_TOKENS_TO_PERSIST so this row
+        # survives the earlier trivial-session cleanup in _seed() and is
+        # still around when the malformed-data loop runs.
+        session.add(AgentRun(
+            id="malformed-run", provider="anthropic", model="claude-sonnet-4-6",
+            input_tokens=1000, output_tokens=1000,
+        ))
+        session.commit()
+        session.exec(text("UPDATE agent_runs SET git_commits = '123' WHERE id = 'malformed-run'"))
+        session.commit()
+
+    with caplog.at_level(logging.ERROR, logger="backend.db"):
+        db_module._seed()
+
+    assert any(
+        "failed to clean up malformed agent_runs data" in r.message and r.levelno >= logging.ERROR
+        for r in caplog.records
+    )
