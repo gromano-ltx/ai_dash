@@ -22,3 +22,8 @@ output "github_deployer_service_account" {
   description = "Service account email GitHub Actions impersonates to deploy (AI-18)"
   value       = google_service_account.github_deployer.email
 }
+
+output "cloud_armor_lb_ip" {
+  description = "Static IP of the external HTTPS LB in front of Cloud Armor / Cloud Run (AI-41). Point DNS for var.lb_domain at this address."
+  value       = google_compute_global_address.lb_ip.address
+}
