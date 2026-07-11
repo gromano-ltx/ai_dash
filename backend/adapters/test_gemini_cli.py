@@ -138,6 +138,16 @@ def test_parse_transcript_content_sets_provider_gemini():
     assert run.provider == "gemini"
 
 
+def test_parse_transcript_content_does_not_set_user():
+    # AI-51 finding 1: this adapter's parse_transcript_content() is only ever
+    # invoked from backend.api.routes.ingest_transcript (an async route),
+    # which always overwrites run.user with api_key.user two lines later —
+    # calling the blocking `git config user.name` subprocess here would be
+    # pure wasted work with no consumer of its result.
+    run = parse_transcript_content(_sample_session())
+    assert run.user is None
+
+
 def test_parse_transcript_content_uses_session_id_as_run_id():
     run = parse_transcript_content(_sample_session())
     assert run.id == "06ba9b64-5701-4a4e-b7eb-4bac2b449d5c"

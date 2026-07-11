@@ -36,12 +36,18 @@ SOURCES = {
 
 
 def _provider_for_path(path: Path) -> str:
+    # Resolve both sides before comparing: a symlinked $HOME (or a
+    # dotfiles-managed ~/.claude/~/.codex) can make a changed-file path and a
+    # SOURCES base disagree lexically while still pointing at the same
+    # on-disk location, which Path.relative_to() alone can't see through.
+    resolved_path = path.resolve()
     for provider, base in SOURCES.items():
         try:
-            path.relative_to(base)
+            resolved_path.relative_to(base.resolve())
             return provider
         except ValueError:
             continue
+    logger.warning(f"could not match {path} to any known provider source, falling back to anthropic")
     return "anthropic"
 
 
@@ -171,7 +177,7 @@ def _ship_urllib(
     req.add_header("X-API-Key", key)
     req.add_header("Content-Type", "text/plain")
     req.add_header("Content-Encoding", "gzip")
-    req.add_header("X-Session-Id", path.stem)
+    req.add_header("X-Session-Id", f"{provider}:{path.stem}")
     req.add_header("X-File-Offset", str(offset))
     req.add_header("X-File-Mtime", str(mtime))
     req.add_header("X-Provider", provider)
@@ -293,7 +299,7 @@ async def ship(
                 "X-API-Key": key,
                 "Content-Type": "text/plain",
                 "Content-Encoding": "gzip",
-                "X-Session-Id": path.stem,
+                "X-Session-Id": f"{provider}:{path.stem}",
                 "X-File-Offset": str(offset),
                 "X-File-Mtime": str(mtime),
                 "X-Provider": provider,

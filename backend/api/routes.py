@@ -364,7 +364,12 @@ async def ingest_transcript(
         raise HTTPException(status_code=400, detail="Empty body")
 
     parse_fn = _select_parser(x_provider)
-    run = parse_fn(content, mtime=x_file_mtime, parent_id=x_parent_id)
+    if x_provider == "openai":
+        # Codex CLI has no subagent/nested-session file convention, so its
+        # parser doesn't accept parent_id (AI-51 finding 4).
+        run = parse_fn(content, mtime=x_file_mtime)
+    else:
+        run = parse_fn(content, mtime=x_file_mtime, parent_id=x_parent_id)
 
     if x_session_id:
         # Keyed by the collector's raw X-Session-Id (needed as-is to stitch

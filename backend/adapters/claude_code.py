@@ -166,7 +166,13 @@ def parse_transcript_content(
         output_tokens=output_tokens,
         label=label or (first_user_text or "")[:80] or "Claude Code session",
         task_description=first_user_text if first_user_text and len(first_user_text.split()) >= 3 else None,
-        user=_get_user(),
+        # user is intentionally left unset here: this function is called
+        # directly from backend.api.routes.ingest_transcript, which always
+        # overwrites run.user with api_key.user immediately after — so
+        # calling the blocking `git config user.name` subprocess in
+        # _get_user() here would be pure wasted work (AI-51 finding 1).
+        # parse_transcript() below (the local watcher.py path, which has no
+        # api_key to fall back on) attaches the real user itself.
         git_commits=list(dict.fromkeys(git_commits)),
         git_prs=list(dict.fromkeys(git_prs)),
         ticket_refs=ticket_refs,
@@ -207,7 +213,10 @@ def parse_transcript(path: Path) -> Optional[AgentRun]:
         stem = path.stem  # e.g. "agent-ad288d9a6846a387d"
         if stem.startswith('agent-'):
             agent_id = stem[len('agent-'):]
-    return parse_transcript_content(content, mtime=mtime, parent_id=parent_id, agent_id=agent_id)
+    run = parse_transcript_content(content, mtime=mtime, parent_id=parent_id, agent_id=agent_id)
+    if run:
+        run.user = _get_user()
+    return run
 
 
 def scan_all_transcripts() -> list[AgentRun]:

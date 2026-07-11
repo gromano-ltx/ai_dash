@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from backend.adapters.claude_code import parse_transcript_content
 
@@ -84,6 +85,18 @@ def test_parse_transcript_content_sets_provider_anthropic():
     assert run.provider == "anthropic"
 
 
+def test_parse_transcript_content_does_not_call_get_user():
+    # AI-51 finding 1: parse_transcript_content() is invoked directly from
+    # backend.api.routes.ingest_transcript (an async route), which always
+    # overwrites run.user with api_key.user two lines later — so calling the
+    # blocking `git config user.name` subprocess here is pure wasted work
+    # (and needlessly stalls the event loop). The real user for the local
+    # watcher path is attached separately by parse_transcript() below.
+    with patch("backend.adapters.claude_code._get_user", side_effect=AssertionError("should not be called")):
+        run = parse_transcript_content(_sample_session())
+    assert run.user is None
+
+
 def test_parse_transcript_content_input_and_output_tokens_unaffected_by_fix():
     run = parse_transcript_content(_sample_session())
     # req-1 (deduped, not double-counted) + req-2: input 5+3=8, output 200+150=350.
@@ -103,3 +116,17 @@ def test_parse_transcript_content_captures_cache_creation_input_tokens_in_meta()
     run = parse_transcript_content(_sample_session())
     # req-1 (deduped) cache_creation_input_tokens=50 + req-2's 0 = 50.
     assert run.meta["cache_creation_input_tokens"] == 50
+
+
+def test_parse_transcript_still_sets_user_for_local_watcher_path(tmp_path):
+    # parse_transcript(path) backs the local watcher.py scan, which has no
+    # api_key/user override — unlike parse_transcript_content() called
+    # directly from the HTTP ingest route, this path must still attach the
+    # real local git user.
+    from backend.adapters.claude_code import parse_transcript
+
+    jsonl_path = tmp_path / "sess-1.jsonl"
+    jsonl_path.write_text(_sample_session())
+    with patch("backend.adapters.claude_code._get_user", return_value="gabby"):
+        run = parse_transcript(jsonl_path)
+    assert run.user == "gabby"

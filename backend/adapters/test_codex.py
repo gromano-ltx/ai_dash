@@ -200,6 +200,16 @@ def test_parse_transcript_content_sets_provider_openai():
     assert run.provider == "openai"
 
 
+def test_parse_transcript_content_does_not_set_user():
+    # AI-51 finding 1: this adapter's parse_transcript_content() is only ever
+    # invoked from backend.api.routes.ingest_transcript (an async route),
+    # which always overwrites run.user with api_key.user two lines later —
+    # calling the blocking `git config user.name` subprocess here would be
+    # pure wasted work with no consumer of its result.
+    run = parse_transcript_content(_sample_session())
+    assert run.user is None
+
+
 def test_parse_transcript_content_uses_model_from_turn_context():
     run = parse_transcript_content(_sample_session())
     assert run.model == "gpt-5-codex"
@@ -254,6 +264,22 @@ def test_parse_transcript_content_skips_environment_context_for_label():
 def test_parse_transcript_content_uses_session_id_as_run_id():
     run = parse_transcript_content(_sample_session())
     assert run.id == "019d9707-10b9-7a42-ba47-8daf19e3639a"
+
+
+def test_parse_transcript_content_has_no_parent_id_or_agent_id_params():
+    # AI-51 finding 4: parent_id/agent_id were copied from claude_code.py's
+    # signature but never populated by any real call site — Codex CLI has no
+    # subagent/nested-session file convention for these. Both params (and
+    # their run_id/parent_id branches) must be gone.
+    import inspect
+    params = inspect.signature(parse_transcript_content).parameters
+    assert "parent_id" not in params
+    assert "agent_id" not in params
+
+
+def test_parse_transcript_content_run_parent_id_is_always_none():
+    run = parse_transcript_content(_sample_session())
+    assert run.parent_id is None
 
 
 def test_parse_transcript_content_status_done_when_mtime_is_old():
