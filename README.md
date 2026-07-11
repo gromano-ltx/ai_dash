@@ -115,6 +115,14 @@ behavior, so prefer the Postgres setup above for anything beyond a quick check.
 Frontend: http://localhost:5173  
 Backend API: http://localhost:8000
 
+**Dialect portability (SQLite locally, Postgres in prod):** prefer ORM/Python logic over raw SQL
+for anything in `backend/db.py`'s migration/cleanup paths — it naturally works on both dialects. If
+raw SQL is genuinely unavoidable, branch explicitly on `engine.dialect.name` rather than writing
+Postgres-only syntax (e.g. `::json`/`::text` casts, the jsonb `-` operator) that silently fails on
+SQLite. Either way, wrap the code path in a broad `try/except` that logs via `logger.exception(...)`
+(never a bare `except: pass`) — a swallowed exception here is exactly how AI-20 shipped a Postgres-only
+cleanup query that silently never ran on local SQLite.
+
 ---
 
 ## Collector setup
