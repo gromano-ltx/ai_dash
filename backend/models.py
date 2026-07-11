@@ -36,8 +36,15 @@ class AgentRun(SQLModel, table=True):
 
 class TranscriptStore(SQLModel, table=True):
     __tablename__ = "transcript_store"
+    # Primary key stays the collector's raw X-Session-Id (path.stem) — needed
+    # as-is to stitch together chunked/incremental ingests of the same file
+    # (see ingest_transcript's X-File-Offset handling). It does NOT always
+    # match AgentRun.id (e.g. Codex's "rollout-<timestamp>-<uuid>.jsonl" vs.
+    # the bare uuid parsed from content) — run_id below is the reliable key
+    # for that lookup instead (see backend.db.find_transcript_store).
     session_id: str = Field(primary_key=True)
     content: str = Field(default="")
+    run_id: Optional[str] = Field(default=None, index=True)
 
 
 class ApiKey(SQLModel, table=True):

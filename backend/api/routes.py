@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from sqlmodel import Session, select
 from typing import Optional
 from sse_starlette.sse import EventSourceResponse
-from backend.db import get_session
+from backend.db import find_transcript_store, get_session
 from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore, User
 from backend.auth import get_optional_user, require_admin
 from backend import sse as sse_bus
@@ -189,7 +189,7 @@ def _describe_run(run: AgentRun) -> dict:
 
 
 def _delete_run_and_transcript(session: Session, run: AgentRun) -> None:
-    stored = session.get(TranscriptStore, run.id)
+    stored = find_transcript_store(session, run.id)
     if stored:
         session.delete(stored)
     session.delete(run)
@@ -351,17 +351,26 @@ async def ingest_transcript(
     if not content.strip():
         raise HTTPException(status_code=400, detail="Empty body")
 
+    parse_fn = _select_parser(x_provider)
+    run = parse_fn(content, mtime=x_file_mtime, parent_id=x_parent_id)
+
     if x_session_id:
+        # Keyed by the collector's raw X-Session-Id (needed as-is to stitch
+        # together chunked/incremental ingests of the same file, above) but
+        # also stamped with the content-parsed run.id — the only reliable
+        # key for providers whose filename doesn't match AgentRun.id (Codex,
+        # Gemini main sessions) — so later lookups by run id (backfill,
+        # delete-cascade) can find this row. See backend.db.find_transcript_store.
         stored = session.get(TranscriptStore, x_session_id)
         if stored:
             stored.content = content
+            if run:
+                stored.run_id = run.id
         else:
-            stored = TranscriptStore(session_id=x_session_id, content=content)
+            stored = TranscriptStore(session_id=x_session_id, content=content, run_id=run.id if run else None)
         session.add(stored)
         session.commit()
 
-    parse_fn = _select_parser(x_provider)
-    run = parse_fn(content, mtime=x_file_mtime, parent_id=x_parent_id)
     if not run:
         raise HTTPException(status_code=422, detail="Could not parse transcript")
     total_tokens = run.input_tokens + run.output_tokens
