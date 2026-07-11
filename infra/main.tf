@@ -227,7 +227,7 @@ resource "google_cloud_run_v2_service" "app" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.db_url.secret_id
-            version = "latest"
+            version = google_secret_manager_secret_version.db_url.version
           }
         }
       }
@@ -237,7 +237,7 @@ resource "google_cloud_run_v2_service" "app" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.dashboard_password.secret_id
-            version = "latest"
+            version = google_secret_manager_secret_version.dashboard_password.version
           }
         }
       }
