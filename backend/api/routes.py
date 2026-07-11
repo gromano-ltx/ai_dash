@@ -368,9 +368,9 @@ async def ingest_transcript(
     if total_tokens < MIN_TOKENS_TO_PERSIST:
         return {"id": run.id, "status": "skipped"}
     run.user = api_key.user
-    run_id, run_status = run.id, run.status
+    run_id, run_status, run_user = run.id, run.status, run.user
     _upsert(run)
-    await sse_bus.broadcast({"type": "run_updated", "id": run_id, "user": run.user})
+    await sse_bus.broadcast({"type": "run_updated", "id": run_id, "user": run_user})
     return {"id": run_id, "status": run_status}
 
 
