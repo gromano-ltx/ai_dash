@@ -98,6 +98,35 @@ def test_backfill_corrects_codex_input_tokens_and_adds_cached_meta():
         assert run.label == "original label"
 
 
+def test_backfill_finds_codex_transcript_when_session_id_differs_from_run_id():
+    # Real Codex transcript filenames are "rollout-<timestamp>-<uuid>.jsonl" —
+    # the collector ships path.stem as X-Session-Id, but AgentRun.id is just
+    # the bare uuid parsed out of the transcript's "session_meta" payload
+    # (see backend/adapters/codex.py). TranscriptStore.session_id is keyed on
+    # the collector's raw value, which never equals AgentRun.id for Codex —
+    # confirmed against production data: 0 of 9 real Codex rows were ever
+    # correctly backfilled by this function before this fix (AI-55).
+    engine = _make_engine()
+    run_id = "019f379e-23e9-7030-b7de-3b6127745f15"
+    raw_filename_stem = f"rollout-2026-07-06T16-28-58-{run_id}"
+    with Session(engine) as session:
+        session.add(AgentRun(
+            id=run_id, provider="openai", model="gpt-5-codex",
+            input_tokens=999999, output_tokens=0, meta={},
+        ))
+        session.add(TranscriptStore(
+            session_id=raw_filename_stem, run_id=run_id,
+            content=_codex_transcript_content().replace("codex-run-1", run_id),
+        ))
+        session.commit()
+
+        _backfill_cached_input_tokens(session)
+
+        run = session.get(AgentRun, run_id)
+        assert run.input_tokens == 1000
+        assert run.meta["cached_input_tokens"] == 0
+
+
 def test_backfill_corrects_claude_code_meta_without_touching_input_tokens():
     engine = _make_engine()
     with Session(engine) as session:

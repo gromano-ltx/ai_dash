@@ -54,6 +54,36 @@ def _add_missing_columns():
                 conn.execute(text(f"ALTER TABLE agent_runs ADD COLUMN {column} FLOAT"))
             logger.info(f"[db] added agent_runs.{column} column")
 
+    if "transcript_store" in inspector.get_table_names():
+        transcript_columns = {c["name"] for c in inspector.get_columns("transcript_store")}
+        if "run_id" not in transcript_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE transcript_store ADD COLUMN run_id VARCHAR"))
+            logger.info("[db] added transcript_store.run_id column")
+
+
+def find_transcript_store(session: Session, run_id: str):
+    """Look up the TranscriptStore row for an AgentRun by its true id.
+
+    Prefers a match on TranscriptStore.run_id — the content-parsed id
+    recorded at write time by ingest_transcript (see backend/api/routes.py) —
+    which is the only reliable key for providers whose collector-supplied
+    X-Session-Id doesn't match the session id embedded in the transcript
+    content itself (Codex's "rollout-<timestamp>-<uuid>.jsonl", Gemini main
+    sessions' "session-<timestamp>-<shortid>.jsonl"). Falls back to the
+    primary-key lookup on session_id for rows written before this fix
+    existed, where session_id and run_id happen to coincide (Claude Code,
+    Gemini subagents).
+    """
+    from backend.models import TranscriptStore
+
+    stored = session.exec(
+        select(TranscriptStore).where(TranscriptStore.run_id == run_id)
+    ).first()
+    if stored:
+        return stored
+    return session.get(TranscriptStore, run_id)
+
 
 def _backfill_cached_input_tokens(session: Session):
     """One-time backfill: recompute input_tokens/meta.cached_input_tokens for
@@ -67,7 +97,7 @@ def _backfill_cached_input_tokens(session: Session):
     at the time of this fix, so nothing to backfill there.
     """
     from backend.adapters import claude_code, codex
-    from backend.models import AgentRun, TranscriptStore
+    from backend.models import AgentRun
 
     parsers = {"openai": codex.parse_transcript_content, "anthropic": claude_code.parse_transcript_content}
     rows = session.exec(
@@ -85,7 +115,7 @@ def _backfill_cached_input_tokens(session: Session):
         )
         if already_migrated:
             continue
-        stored = session.get(TranscriptStore, run.id)
+        stored = find_transcript_store(session, run.id)
         if not stored:
             continue
         parse_fn = parsers[run.provider]
@@ -112,7 +142,7 @@ def _backfill_ticket_refs(session: Session):
     skipped, matching AI-54's cached_input_tokens backfill.
     """
     from backend.adapters import claude_code, codex
-    from backend.models import AgentRun, TranscriptStore
+    from backend.models import AgentRun
 
     parsers = {"openai": codex.parse_transcript_content, "anthropic": claude_code.parse_transcript_content}
     rows = session.exec(
@@ -120,7 +150,7 @@ def _backfill_ticket_refs(session: Session):
     ).all()
     migrated = 0
     for run in rows:
-        stored = session.get(TranscriptStore, run.id)
+        stored = find_transcript_store(session, run.id)
         if not stored:
             continue
         parse_fn = parsers[run.provider]

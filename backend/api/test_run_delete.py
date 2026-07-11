@@ -38,6 +38,29 @@ def _login_admin(test_client) -> None:
     test_client.post("/api/login", json={"username": "gabby", "password": "hunter2"})
 
 
+def test_delete_runs_removes_transcript_when_session_id_differs_from_run_id(test_client):
+    # Real Codex transcript filenames ("rollout-<timestamp>-<uuid>.jsonl")
+    # never match AgentRun.id (the bare uuid parsed from content) — before
+    # this fix, _delete_run_and_transcript's session.get(TranscriptStore,
+    # run.id) always missed for rows like this, leaving the TranscriptStore
+    # row orphaned after the AgentRun was deleted.
+    _login_admin(test_client)
+    run_id = "019f379e-23e9-7030-b7de-3b6127745f15"
+    raw_filename_stem = f"rollout-2026-07-06T16-28-58-{run_id}"
+    with Session(db_module.engine) as session:
+        session.add(AgentRun(id=run_id, provider="openai", model="gpt-5-codex"))
+        session.add(TranscriptStore(session_id=raw_filename_stem, run_id=run_id, content="{}"))
+        session.commit()
+
+    res = test_client.request("DELETE", "/api/runs", json={"ids": [run_id]})
+
+    assert res.status_code == 200
+    assert res.json() == {"deleted": [run_id], "not_found": []}
+    with Session(db_module.engine) as session:
+        assert session.get(AgentRun, run_id) is None
+        assert session.get(TranscriptStore, raw_filename_stem) is None
+
+
 def test_delete_runs_removes_run_and_transcript(test_client):
     _login_admin(test_client)
     _seed_run("run1")
