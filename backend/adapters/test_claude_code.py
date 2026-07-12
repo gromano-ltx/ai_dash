@@ -103,3 +103,34 @@ def test_parse_transcript_content_captures_cache_creation_input_tokens_in_meta()
     run = parse_transcript_content(_sample_session())
     # req-1 (deduped) cache_creation_input_tokens=50 + req-2's 0 = 50.
     assert run.meta["cache_creation_input_tokens"] == 50
+
+
+def test_parse_transcript_content_status_running_when_mtime_is_recent():
+    import time
+    run = parse_transcript_content(_sample_session(), mtime=time.time())
+    assert run.status == "running"
+    assert run.ended_at is None
+
+
+def test_parse_transcript_content_status_done_when_mtime_is_old():
+    import time
+    run = parse_transcript_content(_sample_session(), mtime=time.time() - 3600)
+    assert run.status == "done"
+    assert run.ended_at is not None
+
+
+def test_parse_transcript_content_status_running_just_under_5min_threshold():
+    import time
+    run = parse_transcript_content(_sample_session(), mtime=time.time() - 299)
+    assert run.status == "running"
+
+
+def test_parse_transcript_content_status_done_at_5min_threshold():
+    import time
+    run = parse_transcript_content(_sample_session(), mtime=time.time() - 300)
+    assert run.status == "done"
+
+
+def test_parse_transcript_content_status_done_when_no_mtime_given():
+    run = parse_transcript_content(_sample_session())
+    assert run.status == "done"

@@ -6,8 +6,8 @@ from sqlmodel import Session
 
 import backend.db as db_module
 from backend.adapters import claude_code, codex, gemini_cli
-from backend.api.routes import _select_parser
-from backend.models import ApiKey
+from backend.api.routes import _parents_with_running_children, _select_parser, _to_read
+from backend.models import AgentRun, ApiKey
 
 
 def test_select_parser_dispatches_anthropic():
@@ -88,3 +88,159 @@ def test_ingest_transcript_first_insert_returns_200_not_500(test_client):
 
     assert response.status_code == 200
     assert response.json()["status"] != "skipped"
+
+
+def _seed(session, **overrides) -> AgentRun:
+    defaults = dict(provider="anthropic", model="m", input_tokens=10, output_tokens=10)
+    defaults.update(overrides)
+    run = AgentRun(**defaults)
+    session.add(run)
+    return run
+
+
+def test_list_runs_filters_by_provider(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="run-anthropic", provider="anthropic")
+        _seed(session, id="run-openai", provider="openai")
+        session.commit()
+
+    res = test_client.get("/api/runs?provider=openai")
+    assert res.status_code == 200
+    assert {r["id"] for r in res.json()} == {"run-openai"}
+
+
+def test_list_runs_filters_by_status(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="run-running", status="running")
+        _seed(session, id="run-done", status="done")
+        session.commit()
+
+    res = test_client.get("/api/runs?status=running")
+    assert res.status_code == 200
+    assert {r["id"] for r in res.json()} == {"run-running"}
+
+
+def test_list_runs_filters_by_user_query_param(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="run-alice", user="alice")
+        _seed(session, id="run-bob", user="bob")
+        session.commit()
+
+    res = test_client.get("/api/runs?user=alice")
+    assert res.status_code == 200
+    assert {r["id"] for r in res.json()} == {"run-alice"}
+
+
+def test_list_runs_ticket_filter_matches_case_insensitively(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="run-ticketed", ticket_refs=["AI-46"])
+        _seed(session, id="run-other", ticket_refs=["AI-99"])
+        session.commit()
+
+    res = test_client.get("/api/runs?ticket=ai-46")
+    assert res.status_code == 200
+    assert {r["id"] for r in res.json()} == {"run-ticketed"}
+
+
+def test_list_runs_ticket_filter_tolerates_surrounding_whitespace(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="run-ticketed", ticket_refs=["AI-46"])
+        session.commit()
+
+    res = test_client.get("/api/runs", params={"ticket": "  AI-46  "})
+    assert res.status_code == 200
+    assert {r["id"] for r in res.json()} == {"run-ticketed"}
+
+
+def test_list_runs_ticket_filter_matches_substring(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="run-46", ticket_refs=["AI-46"])
+        _seed(session, id="run-99", ticket_refs=["AI-99"])
+        session.commit()
+
+    res = test_client.get("/api/runs?ticket=46")
+    assert res.status_code == 200
+    assert {r["id"] for r in res.json()} == {"run-46"}
+
+
+def test_parents_with_running_children_returns_parent_ids(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="parent1", status="done")
+        _seed(session, id="child1", parent_id="parent1", status="running")
+        session.commit()
+
+        result = _parents_with_running_children(session, ["parent1"])
+        assert result == {"parent1"}
+
+
+def test_parents_with_running_children_excludes_parent_with_done_child(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="parent1", status="done")
+        _seed(session, id="child1", parent_id="parent1", status="done")
+        session.commit()
+
+        result = _parents_with_running_children(session, ["parent1"])
+        assert result == set()
+
+
+def test_parents_with_running_children_empty_run_ids_returns_empty_set(test_client):
+    with Session(db_module.engine) as session:
+        assert _parents_with_running_children(session, []) == set()
+
+
+def test_to_read_overrides_done_status_when_id_in_running_parents():
+    run = AgentRun(id="parent1", provider="anthropic", model="m", status="done")
+    read = _to_read(run, running_parents={"parent1"})
+    assert read.status == "running"
+
+
+def test_to_read_leaves_done_status_when_id_not_in_running_parents():
+    run = AgentRun(id="parent1", provider="anthropic", model="m", status="done")
+    read = _to_read(run, running_parents=set())
+    assert read.status == "done"
+
+
+def test_to_read_leaves_running_status_untouched_when_id_in_running_parents():
+    run = AgentRun(id="parent1", provider="anthropic", model="m", status="running")
+    read = _to_read(run, running_parents={"parent1"})
+    assert read.status == "running"
+
+
+def test_list_runs_shows_done_parent_as_running_when_child_still_running(test_client):
+    # A parent's own transcript can go idle (tripping its done-timeout) while
+    # it waits on a still-running Task-tool subagent — the parent's reported
+    # status must reflect the child's activity, not its own idle transcript.
+    with Session(db_module.engine) as session:
+        _seed(session, id="parent1", status="done")
+        _seed(session, id="child1", parent_id="parent1", status="running")
+        session.commit()
+
+    res = test_client.get("/api/runs")
+    assert res.status_code == 200
+    runs = {r["id"]: r for r in res.json()}
+    # Subagent rows are excluded from the default listing.
+    assert "child1" not in runs
+    assert runs["parent1"]["status"] == "running"
+
+
+def test_list_runs_leaves_done_parent_as_done_when_child_also_done(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="parent1", status="done")
+        _seed(session, id="child1", parent_id="parent1", status="done")
+        session.commit()
+
+    res = test_client.get("/api/runs")
+    assert res.status_code == 200
+    runs = {r["id"]: r for r in res.json()}
+    assert runs["parent1"]["status"] == "done"
+
+
+def test_get_run_shows_done_parent_as_running_when_child_still_running(test_client):
+    with Session(db_module.engine) as session:
+        _seed(session, id="parent1", status="done")
+        _seed(session, id="child1", parent_id="parent1", status="running")
+        session.commit()
+
+    res = test_client.get("/api/runs/parent1")
+    assert res.status_code == 200
+    assert res.json()["status"] == "running"
