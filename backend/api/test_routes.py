@@ -244,3 +244,52 @@ def test_get_run_shows_done_parent_as_running_when_child_still_running(test_clie
     res = test_client.get("/api/runs/parent1")
     assert res.status_code == 200
     assert res.json()["status"] == "running"
+
+
+def _sample_codex_transcript() -> str:
+    """A minimal, schema-accurate synthetic Codex CLI session transcript."""
+    lines = [
+        _line({
+            "timestamp": "2026-04-16T16:01:55.734Z",
+            "type": "session_meta",
+            "payload": {"id": "codex-sess-1", "cwd": "/tmp", "git": {}},
+        }),
+        _line({
+            "timestamp": "2026-04-16T16:02:00.000Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": {"input_tokens": 50, "output_tokens": 200},
+                    "last_token_usage": {"input_tokens": 50, "cached_input_tokens": 0},
+                },
+            },
+        }),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def test_ingest_transcript_openai_provider_ignores_parent_id_header(test_client):
+    """AI-51 finding 4: codex.py's parser no longer accepts parent_id (it has
+    no subagent/nested-session file convention), but the collector's shared
+    ingest route still accepts an X-Parent-Id header uniformly across
+    providers. Sending one for x-provider=openai must not raise a TypeError
+    from routes.py's parse_fn(...) call."""
+    with Session(db_module.engine) as session:
+        api_key = ApiKey(user="gabby")
+        session.add(api_key)
+        session.commit()
+        key_value = api_key.key
+
+    response = test_client.post(
+        "/api/v1/ingest",
+        content=_sample_codex_transcript(),
+        headers={
+            "x-api-key": key_value,
+            "x-provider": "openai",
+            "x-parent-id": "some-parent-id",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] != "skipped"

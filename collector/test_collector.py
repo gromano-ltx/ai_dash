@@ -139,6 +139,41 @@ def test_provider_for_path_defaults_to_anthropic_for_unrecognized_path(tmp_path,
     assert collector_mod._provider_for_path(tmp_path / "elsewhere" / "file.jsonl") == "anthropic"
 
 
+def test_provider_for_path_logs_when_falling_back_to_anthropic(tmp_path, monkeypatch, caplog):
+    # AI-51 finding 3: falling back to "anthropic" for a path that lexically
+    # matches no SOURCES base is a silent mislabeling risk — it must be logged
+    # so a genuine fallback (as opposed to a real anthropic-source match) is
+    # visible instead of indistinguishable from the common case.
+    monkeypatch.setattr(collector_mod, "SOURCES", {"anthropic": tmp_path / "claude"})
+    with caplog.at_level("WARNING", logger="ai_dash.collector"):
+        collector_mod._provider_for_path(tmp_path / "elsewhere" / "file.jsonl")
+    assert any("fall" in r.message.lower() for r in caplog.records)
+
+
+def test_provider_for_path_resolves_symlinked_source_base(tmp_path, monkeypatch):
+    # AI-51 finding 3: SOURCES bases are built from Path.home(), and changed
+    # file paths come from the filesystem (watchfiles/rglob) — if $HOME (or a
+    # dotfiles-managed ~/.claude or ~/.codex) is a symlink, one side may be
+    # reported in its canonical form and the other not, so a bare
+    # Path.relative_to() lexical comparison can spuriously miss even though
+    # both refer to the same on-disk location. Both sides must be resolved
+    # before comparing.
+    real_root = tmp_path / "real_home"
+    (real_root / "codex" / "sessions").mkdir(parents=True)
+    home_link = tmp_path / "home_link"
+    home_link.symlink_to(real_root)
+
+    monkeypatch.setattr(collector_mod, "SOURCES", {
+        "anthropic": home_link / "claude" / "projects",
+        "openai": home_link / "codex" / "sessions",
+    })
+
+    # Simulate the changed-file path being reported in its already-resolved
+    # (real, non-symlinked) form, as os-level file-watching APIs often do.
+    real_path = real_root / "codex" / "sessions" / "rollout-1.jsonl"
+    assert collector_mod._provider_for_path(real_path) == "openai"
+
+
 def test_sync_all_stdlib_skips_missing_sources(tmp_path, monkeypatch):
     existing = tmp_path / "exists"
     existing.mkdir()
@@ -179,6 +214,69 @@ def test_ship_urllib_sends_x_provider_header(tmp_path, monkeypatch):
 
     assert ok
     assert captured["provider"] == "openai"
+
+
+def test_ship_urllib_prefixes_session_id_with_provider(tmp_path, monkeypatch):
+    # AI-51 finding 2: the collector ships from two independent filesystem
+    # namespaces (~/.claude/projects, ~/.codex/sessions) whose files can, in
+    # principle, share the same path.stem — an unscoped session id would let
+    # one provider's session silently collide with (and overwrite) another's
+    # TranscriptStore row. Prefixing with the provider eliminates that.
+    f = tmp_path / "same-name.jsonl"
+    f.write_text("hello world")
+
+    captured = {}
+
+    class FakeResponse:
+        def read(self):
+            return json.dumps({"id": "abc", "status": "done"}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, context=None, timeout=None):
+        captured["session_id"] = req.get_header("X-session-id")
+        return FakeResponse()
+
+    monkeypatch.setattr(collector_mod.urllib.request, "urlopen", fake_urlopen)
+
+    ok, new_offset, _ = collector_mod._ship_urllib(
+        f, "https://example.test", "test-key", "openai", offset=0, mtime=1.0
+    )
+
+    assert ok
+    assert captured["session_id"] == "openai:same-name"
+
+
+def test_ship_prefixes_session_id_with_provider(tmp_path):
+    # Async-path counterpart to test_ship_urllib_prefixes_session_id_with_provider
+    # (AI-51 finding 2) — the httpx client used by ship() is the default
+    # whenever httpx/watchfiles are installed, so it must get the same fix.
+    f = tmp_path / "same-name.jsonl"
+    f.write_text("hello world")
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"id": "abc", "status": "done"}
+
+    class FakeClient:
+        async def post(self, url, content=None, headers=None, timeout=None):
+            captured["session_id"] = headers["X-Session-Id"]
+            return FakeResponse()
+
+    ok, new_offset, _ = asyncio.run(
+        collector_mod.ship(f, "https://example.test", "test-key", "openai", FakeClient(), offset=0, mtime=1.0)
+    )
+
+    assert ok
+    assert captured["session_id"] == "openai:same-name"
 
 
 def test_sync_all_dispatches_correct_provider_per_source(tmp_path, monkeypatch):
