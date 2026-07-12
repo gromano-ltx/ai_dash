@@ -47,6 +47,11 @@ export interface Stats {
   active_providers: string[];
   running_count: number;
   by_provider: Record<string, ProviderStats>;
+  // AI-48: null when GITHUB_TOKEN isn't configured, or no PR has resolved
+  // (merged/closed) yet in the selected window.
+  pr_merge_success_rate: number | null;
+  pr_merge_success_merged: number;
+  pr_merge_success_resolved: number;
 }
 
 export interface Me {

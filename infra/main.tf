@@ -146,6 +146,19 @@ resource "google_secret_manager_secret_version" "session_secret" {
   secret_data = var.session_secret
 }
 
+resource "google_secret_manager_secret" "github_token" {
+  secret_id = "ai-dash-github-token"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_version" "github_token" {
+  secret      = google_secret_manager_secret.github_token.id
+  secret_data = var.github_token
+}
+
 # ── Service Account ───────────────────────────────────────────────────────────
 
 resource "google_service_account" "app" {
@@ -173,6 +186,12 @@ resource "google_secret_manager_secret_iam_member" "dashboard_password" {
 
 resource "google_secret_manager_secret_iam_member" "session_secret" {
   secret_id = google_secret_manager_secret.session_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.app.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "github_token" {
+  secret_id = google_secret_manager_secret.github_token.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.app.email}"
 }
@@ -247,6 +266,16 @@ resource "google_cloud_run_v2_service" "app" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.session_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
+
+      env {
+        name = "GITHUB_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.github_token.secret_id
             version = "latest"
           }
         }

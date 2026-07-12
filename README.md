@@ -164,6 +164,7 @@ region             = "us-central1"
 db_password        = "..."
 dashboard_password = "..."
 session_secret     = "..."  # signs per-user login session cookies; pick a long random value
+github_token       = "..."  # optional; GitHub PAT for the PR merge success rate stat, see below
 ```
 
 ```bash
@@ -199,6 +200,24 @@ accounts and API keys from Settings.
 
 API ingest requires an `X-API-Key` header. Keys are seeded in the DB on first startup
 (`adk_devkey_local` for local dev) and are managed from Settings by admins.
+
+---
+
+## PR merge success rate
+
+The dashboard's "PR Merge Success Rate" stat card looks up each tracked PR's real state (merged /
+closed-unmerged / open) live against the GitHub REST API — it's a health check for the AI-opened
+PRs recorded in `AgentRun.git_prs`, not just a count. This requires a `GITHUB_TOKEN` env var (a
+GitHub Personal Access Token with `repo` scope, or `public_repo` if all tracked repos are public).
+
+Set it locally via `.env` (see `.env.example`), or in production via `infra/terraform.tfvars`
+(`github_token = "..."`, provisioned into GCP Secret Manager alongside the other secrets).
+
+If `GITHUB_TOKEN` isn't set, the stat is simply omitted (`null`) rather than causing an error —
+this is optional infrastructure, not a hard requirement. A merged/closed PR's state is cached for
+the life of the process (it can't change again); an open PR is re-queried on every `/stats` call
+since its outcome is still pending. A failed or rate-limited lookup for one PR is logged and
+skipped rather than crashing the whole `/stats` endpoint.
 
 ---
 

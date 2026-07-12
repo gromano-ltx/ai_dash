@@ -139,6 +139,20 @@ export function Dashboard() {
           sub="estimated; pricing may change"
           accent="#a8320c"
         />
+        <StatCard
+          label="PR Merge Success Rate"
+          value={
+            stats && stats.pr_merge_success_rate !== null
+              ? `${Math.round(stats.pr_merge_success_rate * 100)}%`
+              : "—"
+          }
+          sub={
+            stats && stats.pr_merge_success_rate !== null
+              ? `${stats.pr_merge_success_merged}/${stats.pr_merge_success_resolved} merged`
+              : "no resolved PRs in range"
+          }
+          accent="#5a8f6b"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
