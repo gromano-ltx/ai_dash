@@ -32,6 +32,9 @@ export function useRuns(filters?: {
   return useQuery<AgentRun[]>({
     queryKey: ["runs", filters],
     queryFn: () => get(`/runs${qs ? `?${qs}` : ""}`),
+    // Belt-and-suspenders alongside useRunsStream's SSE-triggered
+    // invalidation (see lib/sse.ts) — this polling interval is what recovers
+    // freshness if the SSE connection is down or reconnecting.
     refetchInterval: 5000,
   });
 }

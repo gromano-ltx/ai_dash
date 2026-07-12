@@ -117,6 +117,10 @@ def parse_transcript_content(
             model = event.get('model') or model
             tokens = event.get('tokens') or {}
             cached = tokens.get('cached', 0)
+            # Same reasoning as Codex's adapter: Gemini's `input` figure
+            # includes cached tokens, but pricing.py bills cache reads
+            # separately at a discounted rate, so subtract here to keep
+            # input_tokens as the non-cached portion only.
             input_tokens += max(tokens.get('input', 0) - cached, 0)
             cached_input_tokens += cached
             output_tokens += (

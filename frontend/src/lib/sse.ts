@@ -18,6 +18,9 @@ export function useRunsStream() {
             queryClient.invalidateQueries({ queryKey: ["runs"] });
             queryClient.invalidateQueries({ queryKey: ["stats"] });
             queryClient.invalidateQueries({ queryKey: ["run", event.id] });
+            // "daily" is deliberately not invalidated here — it buckets by
+            // day, not by individual run, so its own 30s poll (see useDaily)
+            // is fresh enough and doesn't need a per-event refresh.
           }
         } catch {
           // ignore malformed events

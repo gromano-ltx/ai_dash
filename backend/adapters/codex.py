@@ -135,6 +135,13 @@ def parse_transcript_content(
                 if last and usage_key is not None and usage_key != last_seen_usage_key:
                     li = last.get('input_tokens', 0)
                     lc = last.get('cached_input_tokens', 0)
+                    # Codex's input_tokens figure includes cached tokens, but
+                    # pricing.py bills cache reads separately at a discounted
+                    # rate — subtract here so input_tokens holds only the
+                    # non-cached portion, matching cached_input_tokens'
+                    # meaning for Anthropic (where the API reports them apart
+                    # already). max(...,0) guards against a cached count that
+                    # (rarely) exceeds the input count in the raw event data.
                     input_tokens += max(li - lc, 0)
                     cached_input_tokens += lc
                     last_seen_usage_key = usage_key

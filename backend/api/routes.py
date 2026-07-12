@@ -31,6 +31,9 @@ def _select_parser(provider: str):
 
 MAX_COMPRESSED_BYTES = 10 * 1024 * 1024   # 10 MB compressed
 MAX_INGEST_BYTES = 100 * 1024 * 1024      # 100 MB decompressed
+# Both limits are generous multiples of a typical transcript (a few MB at
+# most) — they exist to bound worst-case memory/CPU on a single request, not
+# to constrain real usage.
 MAX_DELETE_BATCH = 100                    # hard cap on ids per DELETE /runs call
 
 logger = logging.getLogger(__name__)
@@ -91,6 +94,11 @@ def list_runs(
         # Hide subagent runs by default — they appear in the trace tree of their parent
         query = query.where(AgentRun.parent_id == None)  # noqa: E711
     if ticket:
+        # ticket_refs is a JSON list column (see models.py) with no portable
+        # substring/contains query across SQLite and Postgres, so this filters
+        # in Python instead — offset/limit are applied after, by hand, since
+        # the SQL-level .offset()/.limit() below would paginate the wrong
+        # (unfiltered) row set.
         ticket_lower = ticket.strip().lower()
         runs = [
             r for r in session.exec(query).all()
@@ -141,6 +149,10 @@ def delete_runs(
     audit_entries: list[dict] = []
 
     for run_id in ids:
+        # `processed` guards against double-deleting/double-reporting a run
+        # that appears twice across this loop: once as its own explicitly
+        # requested id, and once again as another requested id's child (a
+        # parent and its subagent can both be passed in the same `ids` list).
         if run_id in processed:
             continue
 
@@ -406,6 +418,11 @@ async def stream_runs(
             while True:
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=30)
+                    # The broadcast bus is shared by all connected clients, so a
+                    # non-admin's stream must be filtered here to the same scope
+                    # /runs enforces — otherwise this SSE channel would leak
+                    # other users' run activity even though the REST endpoints
+                    # never would.
                     if (
                         current_user
                         and not current_user.is_admin

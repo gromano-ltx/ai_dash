@@ -113,6 +113,10 @@ def parse_transcript_content(
                 last_assistant_ts = ts
 
             if rid and rid not in seen_request_ids:
+                # A single API request is sometimes logged as more than one
+                # assistant event with the same requestId and identical usage
+                # (seen in real transcripts) — dedupe by requestId so those
+                # tokens aren't counted twice.
                 seen_request_ids.add(rid)
                 usage = msg.get('usage', {})
                 input_tokens += usage.get('input_tokens', 0)
@@ -215,6 +219,9 @@ def scan_all_transcripts() -> list[AgentRun]:
     runs = []
     if not base.exists():
         return runs
+    # Capped at the 50 most recently modified files — this only runs once at
+    # startup (watch() takes over incrementally after), so it's a bound on
+    # startup cost, not an attempt to enumerate every historical transcript.
     for jsonl in sorted(base.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:50]:
         run = parse_transcript(jsonl)
         if run:
