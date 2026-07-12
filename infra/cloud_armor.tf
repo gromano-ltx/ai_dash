@@ -3,30 +3,68 @@
 # Cloud Armor can't attach directly to a Cloud Run service, so this wires up
 # the standard path: serverless NEG -> backend service (w/ Cloud Armor policy)
 # -> URL map -> target HTTPS proxy -> global forwarding rule. The Cloud Run
-# resource's `ingress` field (see main.tf) is restricted to
-# INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER, so this LB is the only path in.
+# resource's `ingress` field (see main.tf) is gated behind
+# var.restrict_ingress_to_lb so this rollout is a deliberate two-phase
+# cutover rather than a single apply that can take the dashboard down.
 #
-# ── Post-apply verification runbook (rate limiting, DoD item) ─────────────────
+# ── Two-phase cutover runbook ──────────────────────────────────────────────────
 #
-# 1. `terraform apply`, then `terraform output cloud_armor_lb_ip`.
-# 2. Point DNS for var.lb_domain at that IP (see the variable's description —
-#    today dash.ai-coordinator.io's Cloudflare Worker targets Cloud Run
-#    directly and needs to be repointed at this LB instead).
-# 3. Wait for the managed SSL cert to finish provisioning:
-#      gcloud compute ssl-certificates describe ai-dash-ssl-cert --global \
-#        --format="value(managed.status)"
-#    (must show ACTIVE before HTTPS requests will succeed).
-# 4. Fire a request storm and confirm requests past #20 in a rolling minute
-#    get denied with 429:
-#      for i in $(seq 1 30); do
-#        curl -s -o /dev/null -w "%{http_code}\n" "https://<lb_domain>/"
-#      done
-#    Expected: the first ~20 responses are whatever the app normally returns
-#    (200/302/401 depending on auth state), and responses from #21 onward in
-#    that same minute are 429 until the window rolls over.
-# 5. Confirm the *.run.app URL itself no longer answers directly (should now
-#    404/403 or hang, since ingress is restricted to the LB only):
-#      curl -s -o /dev/null -w "%{http_code}\n" "$(terraform output -raw service_url)"
+# Why two phases: the Cloudflare Worker today does `fetch()` straight to the
+# Cloud Run URL with a rewritten Host header. The moment Cloud Run's ingress
+# is restricted to the LB, that direct URL stops answering — so the Worker
+# has to be repointed *before* ingress is restricted, not after. There's also
+# a chicken-and-egg problem with the managed SSL cert: it can't go ACTIVE
+# until the domain's public DNS actually resolves to the LB's IP, which
+# conflicts with Cloudflare currently owning that DNS record via the Worker.
+#
+# Phase 1 — stand up the new path without touching the old one:
+#   1. Apply with the default `restrict_ingress_to_lb = false`. This creates
+#      the security policy, NEG, backend service, URL map, managed cert, and
+#      forwarding rule, but leaves Cloud Run's ingress at INGRESS_TRAFFIC_ALL
+#      — the existing Cloudflare-Worker-to-Cloud-Run path keeps serving
+#      traffic completely unchanged.
+#   2. `terraform output cloud_armor_lb_ip`.
+#   3. Test the new path end-to-end *without touching DNS*, using SNI to
+#      route to the right backend while ignoring the not-yet-trusted cert:
+#        curl --resolve dash.ai-coordinator.io:443:<lb_ip> -k \
+#          https://dash.ai-coordinator.io/
+#      Fire a request storm and confirm requests past
+#      var.cloud_armor_rate_limit_per_minute in a rolling minute get denied
+#      with 429:
+#        for i in $(seq 1 30); do
+#          curl --resolve dash.ai-coordinator.io:443:<lb_ip> -k -s -o /dev/null \
+#            -w "%{http_code}\n" https://dash.ai-coordinator.io/
+#        done
+#      Expected: the first ~20 responses are whatever the app normally
+#      returns (200/302/401 depending on auth state), and responses from
+#      #21 onward in that same minute are 429 until the window rolls over.
+#   4. Once that looks right, replace the Cloudflare Worker with a plain
+#      DNS-only ("grey cloud") A record for dash.ai-coordinator.io pointing
+#      at cloud_armor_lb_ip (manual step in the Cloudflare dashboard — there's
+#      no Cloudflare IaC in this repo). The Worker's Host-rewrite hack is no
+#      longer needed once the LB is fronting Cloud Run directly.
+#   5. Poll the managed cert until it's ACTIVE — there's a real risk window
+#      here where HTTPS requests through the LB hit a cert error, so do this
+#      at low-traffic time and watch it closely:
+#        gcloud compute ssl-certificates describe ai-dash-ssl-cert --global \
+#          --format="value(managed.status)"
+#   6. Confirm https://dash.ai-coordinator.io/ now serves correctly through
+#      the LB (real DNS this time, no --resolve override needed).
+#
+# Phase 2 — close off the direct URL (point of no return for the old path):
+#   7. Set `restrict_ingress_to_lb = true` and re-apply. This flips Cloud
+#      Run's ingress to INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER.
+#   8. Confirm the *.run.app URL itself no longer answers directly (should
+#      now 404/403 or hang):
+#        curl -s -o /dev/null -w "%{http_code}\n" "$(terraform output -raw service_url)"
+#   9. Confirm dash.ai-coordinator.io is still healthy through the LB.
+#  10. Update the README "Domain" section — it currently documents the old
+#      Worker-rewrite setup, which this replaces.
+#
+# Rollback: before step 7, rollback is trivial — just point Cloudflare's DNS
+# back at the Worker; the direct Cloud Run URL was never touched. After step
+# 7, rollback means setting restrict_ingress_to_lb back to false and
+# re-applying.
 
 # ── Cloud Armor security policy ────────────────────────────────────────────────
 

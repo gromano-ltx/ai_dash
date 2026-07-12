@@ -47,3 +47,19 @@ variable "lb_domain" {
   type        = string
   default     = "dash.ai-coordinator.io"
 }
+
+variable "restrict_ingress_to_lb" {
+  description = <<-EOT
+    Second phase of the AI-41 cutover — leave this `false` on the apply that
+    first creates the LB/Cloud Armor policy/managed cert, so the existing
+    Cloudflare-Worker-to-Cloud-Run path keeps serving traffic unchanged while
+    the new path is stood up and validated. Only flip to `true` (and re-apply)
+    once: DNS/the Cloudflare Worker has been repointed at `cloud_armor_lb_ip`,
+    the managed cert shows `ACTIVE`, and traffic through the LB has been
+    confirmed healthy. Flipping this to `true` restricts the Cloud Run
+    service's ingress to the LB only, permanently closing the direct
+    `*.run.app` URL — see the runbook in cloud_armor.tf for the full sequence.
+  EOT
+  type        = bool
+  default     = false
+}
