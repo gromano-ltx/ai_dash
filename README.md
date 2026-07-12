@@ -115,6 +115,16 @@ behavior, so prefer the Postgres setup above for anything beyond a quick check.
 Frontend: http://localhost:5173  
 Backend API: http://localhost:8000
 
+### Running tests
+
+```bash
+uv sync            # installs runtime + dev dependencies (pytest, httpx)
+uv run pytest       # runs the full backend + collector suite from repo root
+```
+
+Backend tests run against an isolated in-memory SQLite DB (see `backend/conftest.py`'s
+`test_client` fixture) — no Postgres, dev DB, or network/Linear/GitHub access required.
+
 **Dialect portability (SQLite locally, Postgres in prod):** prefer ORM/Python logic over raw SQL
 for anything in `backend/db.py`'s migration/cleanup paths — it naturally works on both dialects. If
 raw SQL is genuinely unavoidable, branch explicitly on `engine.dialect.name` rather than writing

@@ -8,7 +8,6 @@ from backend.models import AgentRun
 from backend.adapters._common import (
     _classify_shell_command,
     _extract_tickets,
-    _get_user,
     _parse_ts,
     _resolve_command_output,
 )
@@ -19,8 +18,6 @@ DEFAULT_MODEL = "gpt-5-codex"
 def parse_transcript_content(
     content: str,
     mtime: Optional[float] = None,
-    parent_id: Optional[str] = None,
-    agent_id: Optional[str] = None,
 ) -> Optional[AgentRun]:
     events = []
     for line in content.splitlines():
@@ -139,13 +136,7 @@ def parse_transcript_content(
                     cached_input_tokens += lc
                     last_seen_usage_key = usage_key
 
-    if not session_id:
-        session_id = next(
-            (e.get('payload', {}).get('id') for e in events if e.get('type') == 'session_meta'),
-            None,
-        )
-
-    run_id = (f"agent-{agent_id}" if agent_id else None) or session_id or str(uuid.uuid4())
+    run_id = session_id or str(uuid.uuid4())
 
     if mtime is not None:
         # time.time() (not datetime.utcnow().timestamp()) — utcnow() is naive and
@@ -172,10 +163,13 @@ def parse_transcript_content(
         output_tokens=output_tokens,
         label=label,
         task_description=first_user_text if first_user_text and len(first_user_text.split()) >= 3 else None,
-        user=_get_user(),
+        # user is intentionally left unset here: this is only ever called
+        # from backend.api.routes.ingest_transcript, which always overwrites
+        # run.user with api_key.user immediately after — calling the blocking
+        # `git config user.name` subprocess in _get_user() here would be pure
+        # wasted work (AI-51 finding 1).
         git_commits=list(dict.fromkeys(git_commits)),
         git_prs=list(dict.fromkeys(git_prs)),
         ticket_refs=ticket_refs,
-        parent_id=parent_id,
         meta={"git_branch": git_branch, "cwd": cwd, "github_repo": github_repo, "cached_input_tokens": cached_input_tokens},
     )

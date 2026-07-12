@@ -198,6 +198,16 @@ resource "google_cloud_run_v2_service" "app" {
   name     = local.service_name
   location = var.region
 
+  # AI-41: once var.restrict_ingress_to_lb is flipped to true (phase 2 of the
+  # cutover, after DNS/Cloudflare has been repointed at the LB and the
+  # managed cert is ACTIVE — see the runbook in cloud_armor.tf), this
+  # restricts the service to only being reachable through the external HTTPS
+  # LB / serverless NEG, so the Cloud Armor policy can't be bypassed by
+  # hitting the *.run.app URL directly. Left at INGRESS_TRAFFIC_ALL by
+  # default so phase 1 (standing up the LB) doesn't take down the existing
+  # Cloudflare-Worker-to-Cloud-Run path.
+  ingress = var.restrict_ingress_to_lb ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
+
   template {
     service_account = google_service_account.app.email
     timeout         = "3600s"
@@ -283,7 +293,13 @@ resource "google_cloud_run_v2_service" "app" {
   }
 }
 
-# Public access — dashboard is protected by DASHBOARD_PASSWORD
+# Invoker is still allUsers (Cloud Run IAM can't distinguish "the LB" as a
+# caller identity). Once var.restrict_ingress_to_lb is true (see the
+# `ingress` setting above and the cloud_armor.tf runbook), the `ingress`
+# setting means this only matters for requests arriving via the external
+# HTTPS LB + Cloud Armor policy — the *.run.app URL itself is no longer
+# reachable from the public internet. DASHBOARD_PASSWORD remains the
+# app-level check.
 resource "google_cloud_run_v2_service_iam_member" "public" {
   location = google_cloud_run_v2_service.app.location
   name     = google_cloud_run_v2_service.app.name

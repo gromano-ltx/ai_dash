@@ -35,7 +35,7 @@ def _is_static_frontend_asset(path: str) -> bool:
     return target.is_file()
 
 
-async def _cleanup_stale_runs():
+async def _sweep_stale_runs():
     """Mark 'running' sessions as 'done' if they haven't been updated in 10 minutes.
 
     Sessions are stored as 'running' when first ingested while fresh. The collector
@@ -51,32 +51,36 @@ async def _cleanup_stale_runs():
     from sqlmodel import select, or_
     from backend.db import get_session as _get_session
     from backend.models import AgentRun
+    try:
+        with next(_get_session()) as session:
+            cutoff = datetime.utcnow() - timedelta(minutes=10)
+            stale = session.exec(
+                select(AgentRun).where(
+                    AgentRun.status == "running",
+                    or_(AgentRun.updated_at < cutoff, AgentRun.updated_at == None),  # noqa: E711
+                )
+            ).all()
+            for run in stale:
+                run.status = "done"
+                # Only set ended_at when updated_at gives a real proxy
+                # for when the session went idle. Falling back to
+                # started_at would make ended_at == started_at — a
+                # fabricated 0s duration, which is more misleading than
+                # leaving duration unknown (still "—") for these rows.
+                if run.updated_at:
+                    run.ended_at = run.updated_at
+                session.add(run)
+            if stale:
+                session.commit()
+                print(f"[cleanup] marked {len(stale)} stale runs as done")
+    except Exception as exc:
+        print(f"[cleanup] error: {exc}")
+
+
+async def _cleanup_stale_runs():
     while True:
         await asyncio.sleep(120)
-        try:
-            with next(_get_session()) as session:
-                cutoff = datetime.utcnow() - timedelta(minutes=10)
-                stale = session.exec(
-                    select(AgentRun).where(
-                        AgentRun.status == "running",
-                        or_(AgentRun.updated_at < cutoff, AgentRun.updated_at == None),  # noqa: E711
-                    )
-                ).all()
-                for run in stale:
-                    run.status = "done"
-                    # Only set ended_at when updated_at gives a real proxy
-                    # for when the session went idle. Falling back to
-                    # started_at would make ended_at == started_at — a
-                    # fabricated 0s duration, which is more misleading than
-                    # leaving duration unknown (still "—") for these rows.
-                    if run.updated_at:
-                        run.ended_at = run.updated_at
-                    session.add(run)
-                if stale:
-                    session.commit()
-                    print(f"[cleanup] marked {len(stale)} stale runs as done")
-        except Exception as exc:
-            print(f"[cleanup] error: {exc}")
+        await _sweep_stale_runs()
 
 
 @asynccontextmanager
