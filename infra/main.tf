@@ -198,6 +198,11 @@ resource "google_cloud_run_v2_service" "app" {
   name     = local.service_name
   location = var.region
 
+  # AI-41: only reachable through the external HTTPS LB / serverless NEG
+  # (see cloud_armor.tf) so the Cloud Armor policy can't be bypassed by
+  # hitting the *.run.app URL directly.
+  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+
   template {
     service_account = google_service_account.app.email
     timeout         = "3600s"
@@ -283,7 +288,11 @@ resource "google_cloud_run_v2_service" "app" {
   }
 }
 
-# Public access — dashboard is protected by DASHBOARD_PASSWORD
+# Invoker is still allUsers (Cloud Run IAM can't distinguish "the LB" as a
+# caller identity), but as of AI-41 the `ingress` setting above means this
+# only matters for requests arriving via the external HTTPS LB + Cloud Armor
+# policy in cloud_armor.tf — the *.run.app URL itself is no longer reachable
+# from the public internet. DASHBOARD_PASSWORD remains the app-level check.
 resource "google_cloud_run_v2_service_iam_member" "public" {
   location = google_cloud_run_v2_service.app.location
   name     = google_cloud_run_v2_service.app.name
