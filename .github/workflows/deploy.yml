@@ -30,41 +30,30 @@ jobs:
     needs: checks
     runs-on: ubuntu-slim
     permissions:
-      id-token: write
       contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: "projects/799926263517/locations/global/workloadIdentityPools/github-actions/providers/github"
-          service_account: "github-deployer@devops-ai-tools.iam.gserviceaccount.com"
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Deploy via Cloud Build
-        # gcloud builds submit's wait/stream mechanism needs read access to
-        # Cloud Build's Google-managed default logs bucket even with
-        # --suppress-logs (confirmed live: identical "Viewer/Owner of the
-        # project" error either way) — broader than github-deployer should
-        # have, and not a bucket we can grant IAM on ourselves. Submitting
-        # --async and polling status via `builds describe` avoids that
-        # entirely: cloudbuild.builds.editor (already granted) includes
-        # builds.get/.list, no log-bucket access needed at all.
+      - name: Build and push image
         run: |
           SHA=$(git rev-parse --short HEAD)
-          BUILD_ID=$(gcloud builds submit --config cloudbuild.yaml --substitutions=_TAG="$SHA" --async --format="value(id)" .)
-          echo "Cloud Build ID: $BUILD_ID"
-          for i in $(seq 1 120); do
-            STATUS=$(gcloud builds describe "$BUILD_ID" --format="value(status)")
-            echo "Status: $STATUS"
-            case "$STATUS" in
-              SUCCESS) exit 0 ;;
-              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
-                echo "Build failed with status: $STATUS" >&2
-                exit 1
-                ;;
-            esac
-            sleep 5
-          done
-          echo "Timed out waiting for build to complete" >&2
-          exit 1
+          docker build -t "ghcr.io/gromano-ltx/ai_dash:$SHA" .
+          docker push "ghcr.io/gromano-ltx/ai_dash:$SHA"
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+
+      - name: Set up kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+
+      - name: Deploy to k3s
+        run: |
+          echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > kubeconfig
+          KUBECONFIG=kubeconfig kubectl set image deployment/ai-dash "app=ghcr.io/gromano-ltx/ai_dash:$SHA"
+          KUBECONFIG=kubeconfig kubectl rollout status deployment/ai-dash --timeout=120s
+          rm kubeconfig
