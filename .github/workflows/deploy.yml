@@ -10,17 +10,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Backend import check
-        run: |
-          pip install -e .
-          python -c "import backend.main"
-
       - name: Frontend typecheck + build
         working-directory: frontend
         run: |
           npm ci
           npx tsc --noEmit
           npm run build
+
+      - name: Backend tests
+        # Must run after the frontend build: backend/main.py only registers
+        # its SPA catch-all route (and the tests that depend on it) when
+        # frontend/dist already exists at import time.
+        run: |
+          pip install -e .
+          pip install pytest httpx watchfiles
+          python -m pytest backend/ -v
 
   deploy:
     needs: checks

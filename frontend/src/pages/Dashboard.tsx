@@ -139,6 +139,31 @@ export function Dashboard() {
           sub="estimated; pricing may change"
           accent="#a8320c"
         />
+        <StatCard
+          label="Avg Tokens / PR"
+          value={stats?.avg_tokens_per_pr != null ? fmt(Math.round(stats.avg_tokens_per_pr)) : "—"}
+          accent="#c17f2e"
+        />
+        <StatCard
+          label="Avg Cost / PR"
+          value={stats?.avg_cost_per_pr_usd != null ? `$${stats.avg_cost_per_pr_usd.toFixed(2)}` : "—"}
+          sub="estimated; pricing may change"
+          accent="#a8320c"
+        />
+        <StatCard
+          label="PR Merge Success Rate"
+          value={
+            stats && stats.pr_merge_success_rate !== null
+              ? `${Math.round(stats.pr_merge_success_rate * 100)}%`
+              : "—"
+          }
+          sub={
+            stats && stats.pr_merge_success_rate !== null
+              ? `${stats.pr_merge_success_merged}/${stats.pr_merge_success_resolved} merged`
+              : "no resolved PRs in range"
+          }
+          accent="#5a8f6b"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

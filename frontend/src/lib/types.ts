@@ -44,9 +44,16 @@ export interface Stats {
   total_commits_7d: number;
   total_prs_7d: number;
   total_cost_usd: number;
+  avg_tokens_per_pr: number | null;
+  avg_cost_per_pr_usd: number | null;
   active_providers: string[];
   running_count: number;
   by_provider: Record<string, ProviderStats>;
+  // AI-48: null when GITHUB_TOKEN isn't configured, or no PR has resolved
+  // (merged/closed) yet in the selected window.
+  pr_merge_success_rate: number | null;
+  pr_merge_success_merged: number;
+  pr_merge_success_resolved: number;
 }
 
 export interface Me {

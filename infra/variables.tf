@@ -79,3 +79,10 @@ variable "restrict_ingress_to_lb" {
   type        = bool
   default     = false
 }
+
+variable "github_token" {
+  description = "GitHub PAT (repo or public_repo scope) used to look up PR merge/build status for AI-48's PR success rate stat. Optional — the app degrades gracefully (omits the stat) if left blank."
+  type        = string
+  sensitive   = true
+  default     = ""
+}

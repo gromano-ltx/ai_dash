@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from backend.db import find_transcript_store, get_session
 from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore, User
 from backend.auth import get_optional_user, require_admin
+from backend import github as github_module
 from backend import sse as sse_bus
 from backend.adapters import claude_code, codex, gemini_cli
 from backend.watcher import _upsert, MIN_TOKENS_TO_PERSIST
@@ -31,6 +32,9 @@ def _select_parser(provider: str):
 
 MAX_COMPRESSED_BYTES = 10 * 1024 * 1024   # 10 MB compressed
 MAX_INGEST_BYTES = 100 * 1024 * 1024      # 100 MB decompressed
+# Both limits are generous multiples of a typical transcript (a few MB at
+# most) — they exist to bound worst-case memory/CPU on a single request, not
+# to constrain real usage.
 MAX_DELETE_BATCH = 100                    # hard cap on ids per DELETE /runs call
 
 logger = logging.getLogger(__name__)
@@ -91,6 +95,11 @@ def list_runs(
         # Hide subagent runs by default — they appear in the trace tree of their parent
         query = query.where(AgentRun.parent_id == None)  # noqa: E711
     if ticket:
+        # ticket_refs is a JSON list column (see models.py) with no portable
+        # substring/contains query across SQLite and Postgres, so this filters
+        # in Python instead — offset/limit are applied after, by hand, since
+        # the SQL-level .offset()/.limit() below would paginate the wrong
+        # (unfiltered) row set.
         ticket_lower = ticket.strip().lower()
         runs = [
             r for r in session.exec(query).all()
@@ -141,6 +150,10 @@ def delete_runs(
     audit_entries: list[dict] = []
 
     for run_id in ids:
+        # `processed` guards against double-deleting/double-reporting a run
+        # that appears twice across this loop: once as its own explicitly
+        # requested id, and once again as another requested id's child (a
+        # parent and its subagent can both be passed in the same `ids` list).
         if run_id in processed:
             continue
 
@@ -252,6 +265,31 @@ def get_daily(
     return list(buckets.values())
 
 
+def _pr_merge_success_stats(recent: list[AgentRun]) -> dict:
+    """AI-48: merged vs. resolved (merged + closed-unmerged) PR counts for the
+    window, live-looked-up against the GitHub API. Open/pending PRs and PRs
+    whose lookup failed are excluded from both counts — they're neither a
+    success nor a failure yet. Degrades to a null rate (not a crash) when
+    GITHUB_TOKEN isn't configured or no PR resolved either way.
+    """
+    if not github_module.GITHUB_TOKEN:
+        return {"pr_merge_success_rate": None, "pr_merge_success_merged": 0, "pr_merge_success_resolved": 0}
+
+    merged = 0
+    resolved = 0
+    for run in recent:
+        for pr_url in run.git_prs:
+            state = github_module.get_pr_state(pr_url)
+            if state in ("merged", "closed"):
+                resolved += 1
+                if state == "merged":
+                    merged += 1
+            # state is "open" or None (unresolved/lookup failure) — excluded.
+
+    rate = (merged / resolved) if resolved else None
+    return {"pr_merge_success_rate": rate, "pr_merge_success_merged": merged, "pr_merge_success_resolved": resolved}
+
+
 @router.get("/stats")
 def get_stats(
     user: Optional[str] = None,
@@ -268,15 +306,21 @@ def get_stats(
     if user:
         runs = [r for r in runs if r.user == user]
         recent = [r for r in recent if r.user == user]
+    total_input_tokens = sum(r.input_tokens for r in recent)
+    total_output_tokens = sum(r.output_tokens for r in recent)
+    total_prs = sum(len(r.git_prs) for r in recent)
+    total_cost = sum(r.estimated_cost_usd for r in recent if r.estimated_cost_usd is not None)
     return {
         "total_runs_7d": len(recent),
-        "total_input_tokens_7d": sum(r.input_tokens for r in recent),
-        "total_output_tokens_7d": sum(r.output_tokens for r in recent),
+        "total_input_tokens_7d": total_input_tokens,
+        "total_output_tokens_7d": total_output_tokens,
         "total_commits_7d": sum(len(r.git_commits) for r in recent),
-        "total_prs_7d": sum(len(r.git_prs) for r in recent),
-        "total_cost_usd": sum(
-            r.estimated_cost_usd for r in recent if r.estimated_cost_usd is not None
+        "total_prs_7d": total_prs,
+        "total_cost_usd": total_cost,
+        "avg_tokens_per_pr": (
+            (total_input_tokens + total_output_tokens) / total_prs if total_prs else None
         ),
+        "avg_cost_per_pr_usd": (total_cost / total_prs if total_prs else None),
         "days": days,
         "active_providers": list({r.provider for r in recent}),
         "running_count": sum(1 for r in runs if r.status == "running"),
@@ -289,6 +333,7 @@ def get_stats(
             }
             for p in PROVIDERS
         },
+        **_pr_merge_success_stats(recent),
     }
 
 
@@ -411,6 +456,11 @@ async def stream_runs(
             while True:
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=30)
+                    # The broadcast bus is shared by all connected clients, so a
+                    # non-admin's stream must be filtered here to the same scope
+                    # /runs enforces — otherwise this SSE channel would leak
+                    # other users' run activity even though the REST endpoints
+                    # never would.
                     if (
                         current_user
                         and not current_user.is_admin
