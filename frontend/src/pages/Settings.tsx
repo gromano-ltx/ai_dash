@@ -356,6 +356,11 @@ function ApiKeysSection() {
 
 export function Settings() {
   const { data: me } = useMe();
+  // /api/me returns {username: null, is_admin: false} when no accounts exist
+  // yet — reaching this page at all then means the shared Basic Auth
+  // password (if any) already got the request past the middleware. That's
+  // the one-time "create the first account" flow, so isBootstrap alone (not
+  // is_admin, which is false here) is what gates showing account creation.
   const isBootstrap = !!me && me.username === null;
   const isAdmin = me?.is_admin ?? false;
 

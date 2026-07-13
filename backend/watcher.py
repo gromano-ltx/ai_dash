@@ -14,6 +14,9 @@ MIN_TOKENS_TO_PERSIST = 150
 
 
 async def watch() -> None:
+    # One-time catch-up scan on startup (e.g. after a restart) so recent
+    # sessions aren't missed while waiting for their next file-change event;
+    # the awatch loop below only reacts to changes from this point forward.
     for run in scan_all_transcripts():
         _upsert(run)
 
