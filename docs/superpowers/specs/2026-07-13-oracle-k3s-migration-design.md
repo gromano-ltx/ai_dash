@@ -1,5 +1,8 @@
 # Migrate ai_dash off GCP to Oracle Cloud + k3s
 
+See `assets/2026-07-13-oracle-k3s-migration-diagram.html` for a side-by-side current-vs-target
+architecture diagram (open in a browser).
+
 ## Context
 
 ai_dash currently runs entirely on GCP, owned by LTX's org/billing:

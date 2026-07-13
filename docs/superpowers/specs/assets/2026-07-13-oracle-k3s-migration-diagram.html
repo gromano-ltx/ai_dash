@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ai_dash infra migration — GCP vs Oracle Cloud + k3s</title>
+<style>
+  .viz-root {
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+
+    --series-1: #2a78d6; /* blue    — Edge / WAF / TLS */
+    --series-2: #1baf7a; /* aqua    — Compute */
+    --series-3: #eda100; /* yellow  — Database */
+    --series-4: #008300; /* green   — Image Registry */
+    --series-5: #4a3aa7; /* violet  — CI/CD */
+    --series-6: #e34948; /* red     — Secrets */
+  }
+  @media (prefers-color-scheme: dark) {
+    .viz-root {
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --series-3: #c98500;
+      --series-4: #008300;
+      --series-5: #9085e9;
+      --series-6: #e66767;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text-primary);
+  }
+  .viz-root { padding: 32px 24px 48px; max-width: 1080px; margin: 0 auto; }
+
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin: 0 0 20px; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    padding: 10px 14px; margin-bottom: 24px;
+    background: var(--surface-1); border: 1px solid var(--gridline); border-radius: 8px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+  .client-node {
+    text-align: center; margin: 0 auto 4px; max-width: 360px;
+    background: var(--surface-1); border: 1px solid var(--gridline); border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600;
+  }
+  .client-node span { display: block; font-weight: 400; color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
+
+  .down-arrows {
+    display: grid; grid-template-columns: 1fr 1fr; max-width: 100%;
+    text-align: center; color: var(--text-muted); font-size: 18px; line-height: 1;
+    margin: 2px 0 10px;
+  }
+
+  .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .col-head {
+    text-align: center; font-size: 13px; font-weight: 700;
+    padding-bottom: 6px; margin-bottom: 12px; border-bottom: 2px solid var(--gridline);
+  }
+  .col-head .tag {
+    display: block; font-weight: 400; font-size: 11px; color: var(--text-secondary); margin-top: 2px;
+  }
+
+  .row { display: grid; grid-template-columns: 1fr; margin-bottom: 10px; position: relative; }
+  .row:not(:last-child)::after {
+    content: ""; position: absolute; left: 50%; bottom: -10px; width: 1px; height: 10px;
+    background: var(--gridline); transform: translateX(-50%);
+  }
+
+  .box {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--cat-color, var(--series-1));
+    border-radius: 6px;
+    padding: 10px 12px;
+    cursor: default;
+    transition: box-shadow 120ms ease, transform 120ms ease;
+  }
+  .box:hover, .box:focus-visible {
+    box-shadow: 0 2px 10px rgba(0,0,0,0.10);
+    transform: translateY(-1px);
+    outline: none;
+  }
+  .box .cat {
+    font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted); margin-bottom: 2px;
+  }
+  .box .name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+  .box .desc { font-size: 11.5px; color: var(--text-secondary); margin-top: 3px; line-height: 1.35; }
+
+  .cost-row { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 18px; }
+  .cost-tile {
+    background: var(--surface-1); border: 1px solid var(--gridline); border-radius: 8px;
+    padding: 12px 14px; text-align: center;
+  }
+  .cost-tile .figure { font-size: 22px; font-weight: 700; }
+  .cost-tile .label { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+  .foot {
+    margin-top: 22px; font-size: 11.5px; color: var(--text-muted); text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="viz-root">
+
+  <h1>ai_dash infrastructure migration</h1>
+  <p class="subtitle">Current (GCP) vs. target (Oracle Cloud + k3s) — hover a box for detail. Same color = same role across both stacks.</p>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="client-node">
+    Client (browser) / collector daemon
+    <span>Same client in both stacks — only the backend changes</span>
+  </div>
+  <div class="down-arrows"><div>↓</div><div>↓</div></div>
+
+  <div class="columns">
+    <div>
+      <div class="col-head">Current — GCP<span class="tag">Billed via LTX org — access ends 2026-07-31</span></div>
+      <div id="col-gcp"></div>
+    </div>
+    <div>
+      <div class="col-head">Target — Oracle Cloud + k3s<span class="tag">Always Free tier — $0/month baseline</span></div>
+      <div id="col-oracle"></div>
+    </div>
+  </div>
+
+  <div class="cost-row">
+    <div class="cost-tile">
+      <div class="figure">LTX billing</div>
+      <div class="label">Cloud Run + Cloud SQL + Cloud Armor/LB + Secret Manager + Artifact Registry + Cloud Build</div>
+    </div>
+    <div class="cost-tile">
+      <div class="figure">$0/mo baseline</div>
+      <div class="label">Oracle Always Free + Neon free tier + Cloudflare free + ghcr.io — a few $/mo optional later for HA</div>
+    </div>
+  </div>
+
+  <p class="foot">Design: docs/superpowers/specs/2026-07-13-oracle-k3s-migration-design.md · Plan: docs/superpowers/plans/2026-07-13-oracle-k3s-migration.md</p>
+</div>
+
+<script>
+const categories = [
+  { key: "edge",     label: "Edge / WAF / TLS", color: "var(--series-1)" },
+  { key: "compute",  label: "Compute",           color: "var(--series-2)" },
+  { key: "db",       label: "Database",          color: "var(--series-3)" },
+  { key: "registry", label: "Image Registry",    color: "var(--series-4)" },
+  { key: "cicd",     label: "CI/CD",             color: "var(--series-5)" },
+  { key: "secrets",  label: "Secrets",           color: "var(--series-6)" },
+];
+
+const gcp = {
+  edge:     { name: "Cloud Armor + external HTTPS LB", desc: "Serverless NEG → backend service, 20 req/min/IP rate limit, managed SSL cert (mid two-phase ingress cutover)" },
+  compute:  { name: "Cloud Run", desc: "Single container: FastAPI backend + built React SPA, 1 vCPU / 512Mi" },
+  db:       { name: "Cloud SQL — Postgres 15", desc: "db-f1-micro, private IP only, deletion-protected" },
+  registry: { name: "Artifact Registry", desc: "Docker image storage" },
+  cicd:     { name: "Cloud Build + GitHub Actions", desc: "Workload Identity Federation (no service-account keys), SHA-tagged deploys" },
+  secrets:  { name: "Secret Manager", desc: "DATABASE_URL, DASHBOARD_PASSWORD, SESSION_SECRET" },
+};
+
+const oracle = {
+  edge:     { name: "Cloudflare (free plan)", desc: "DNS + TLS (Full strict, Origin CA cert), managed WAF rules + ~20 req/min/IP rate-limit rule" },
+  compute:  { name: "k3s on Oracle Ampere A1", desc: "Real, CNCF-conformant Kubernetes — Always Free 4 OCPU/24GB, single node to start" },
+  db:       { name: "Neon (managed Postgres)", desc: "Free tier — 3GB, autosuspend, automatic backups; drop-in DATABASE_URL swap" },
+  registry: { name: "GitHub Container Registry", desc: "ghcr.io — free, uses built-in GITHUB_TOKEN" },
+  cicd:     { name: "GitHub Actions → kubectl", desc: "Build/push to ghcr.io, kubectl set image against the k3s cluster" },
+  secrets:  { name: "Kubernetes Secrets", desc: "Applied out-of-band (not committed to git); sealed-secrets/SOPS deferred to hardening phase" },
+};
+
+function el(tag, cls, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+}
+
+const legend = document.getElementById("legend");
+categories.forEach(c => {
+  const item = el("div", "legend-item");
+  const sw = el("span", "swatch");
+  sw.style.background = c.color;
+  item.appendChild(sw);
+  item.appendChild(document.createTextNode(c.label));
+  legend.appendChild(item);
+});
+
+function renderColumn(containerId, data) {
+  const container = document.getElementById(containerId);
+  categories.forEach(c => {
+    const item = data[c.key];
+    const row = el("div", "row");
+    const box = el("div", "box");
+    box.style.setProperty("--cat-color", c.color);
+    box.tabIndex = 0;
+    box.appendChild(el("div", "cat", c.label));
+    box.appendChild(el("div", "name", item.name));
+    box.appendChild(el("div", "desc", item.desc));
+    row.appendChild(box);
+    container.appendChild(row);
+  });
+}
+
+renderColumn("col-gcp", gcp);
+renderColumn("col-oracle", oracle);
+</script>
+</body>
+</html>
