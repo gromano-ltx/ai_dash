@@ -146,7 +146,13 @@ resource "google_secret_manager_secret_version" "session_secret" {
   secret_data = var.session_secret
 }
 
+## AI-48: github_token is optional (default ""), and Secret Manager rejects
+# an empty secret payload outright — so these resources (and the Cloud Run
+# env var below) only get created once a real token is actually supplied.
+# Until then, `terraform apply` is a no-op for this feature and the app's
+# own GITHUB_TOKEN-unset fallback (see backend/github.py) is what's live.
 resource "google_secret_manager_secret" "github_token" {
+  count     = var.github_token != "" ? 1 : 0
   secret_id = "ai-dash-github-token"
   replication {
     auto {}
@@ -155,7 +161,8 @@ resource "google_secret_manager_secret" "github_token" {
 }
 
 resource "google_secret_manager_secret_version" "github_token" {
-  secret      = google_secret_manager_secret.github_token.id
+  count       = var.github_token != "" ? 1 : 0
+  secret      = google_secret_manager_secret.github_token[0].id
   secret_data = var.github_token
 }
 
@@ -191,7 +198,8 @@ resource "google_secret_manager_secret_iam_member" "session_secret" {
 }
 
 resource "google_secret_manager_secret_iam_member" "github_token" {
-  secret_id = google_secret_manager_secret.github_token.id
+  count     = var.github_token != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.github_token[0].id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.app.email}"
 }
@@ -281,12 +289,19 @@ resource "google_cloud_run_v2_service" "app" {
         }
       }
 
-      env {
-        name = "GITHUB_TOKEN"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.github_token.secret_id
-            version = "latest"
+      # AI-48: only present once var.github_token is actually set (see the
+      # conditional secret resources above) — count/for_each can't gate a
+      # single static `env` block, so this uses `dynamic` over a 0-or-1-item
+      # list instead.
+      dynamic "env" {
+        for_each = var.github_token != "" ? [1] : []
+        content {
+          name = "GITHUB_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.github_token[0].secret_id
+              version = "latest"
+            }
           }
         }
       }
