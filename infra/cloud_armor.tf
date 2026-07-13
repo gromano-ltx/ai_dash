@@ -24,20 +24,25 @@
 #      — the existing Cloudflare-Worker-to-Cloud-Run path keeps serving
 #      traffic completely unchanged.
 #   2. `terraform output cloud_armor_lb_ip`.
-#   3. Test the new path end-to-end *without touching DNS*, using SNI to
-#      route to the right backend while ignoring the not-yet-trusted cert:
-#        curl --resolve dash.ai-coordinator.io:443:<lb_ip> -k \
-#          https://dash.ai-coordinator.io/
-#      Fire a request storm and confirm requests past
-#      var.cloud_armor_rate_limit_per_minute in a rolling minute get denied
-#      with 429:
-#        for i in $(seq 1 30); do
-#          curl --resolve dash.ai-coordinator.io:443:<lb_ip> -k -s -o /dev/null \
-#            -w "%{http_code}\n" https://dash.ai-coordinator.io/
-#        done
-#      Expected: the first ~20 responses are whatever the app normally
-#      returns (200/302/401 depending on auth state), and responses from
-#      #21 onward in that same minute are 429 until the window rolls over.
+#   3. Known limitation, confirmed in practice: `curl --resolve ... -k` at
+#      this stage does NOT give a usable end-to-end test — while the cert is
+#      still PROVISIONING, the LB's HTTPS listener resets the TLS handshake
+#      outright (curl error 35 / SSL_ERROR_SYSCALL) rather than presenting
+#      any certificate to ignore with `-k`. There is no way to fully
+#      validate the HTTPS path before the DNS cutover in step 4 — the
+#      cert-activation chicken-and-egg problem described above is real, not
+#      just theoretical. Treat step 3 as a structural sanity check only
+#      (confirms the LB accepts a TCP connection on 443); the real
+#      validation happens after step 5, once the cert is ACTIVE.
+#      To confirm the rate-limit rules themselves once HTTPS is actually
+#      working (after step 5): fire a request storm and confirm requests
+#      past var.cloud_armor_login_rate_limit_per_minute against /api/login
+#      get denied with 429, while general traffic has much more headroom
+#      (var.cloud_armor_rate_limit_per_minute) — see the two-tier rule
+#      design in the security policy below. Don't test the general limit
+#      with a tight loop from your own machine without accounting for the
+#      frontend's own background polling sharing the same per-IP counter if
+#      you have the dashboard open at the same time.
 #   4. Once that looks right, replace the Cloudflare Worker with a plain
 #      DNS-only ("grey cloud") A record for dash.ai-coordinator.io pointing
 #      at cloud_armor_lb_ip (manual step in the Cloudflare dashboard — there's
@@ -72,7 +77,40 @@ resource "google_compute_security_policy" "app" {
   name        = "${local.service_name}-cloud-armor"
   description = "Rate-limits requests to the ${local.service_name} LB (AI-41)"
 
-  # Throttle/deny clients exceeding the per-IP rate limit.
+  # Real-world validation after the Phase 1 cutover (see runbook above) found
+  # the original single blanket 20 req/min rule constantly self-triggered:
+  # the frontend's own polling (/runs every 5s, /stats every 10s, /daily
+  # every 30s) already sustains ~20 req/min from one open tab alone. Split
+  # into two tiers instead — a strict, low-priority-number (evaluated first)
+  # rule scoped to just /api/login for actual brute-force protection, and a
+  # generous blanket rule for everything else so normal polling never trips
+  # it.
+  rule {
+    action   = "throttle"
+    priority = 900
+
+    match {
+      expr {
+        expression = "request.path.matches('^/api/login')"
+      }
+    }
+
+    rate_limit_options {
+      conform_action = "allow"
+      exceed_action  = "deny(429)"
+      enforce_on_key = "IP"
+
+      rate_limit_threshold {
+        count        = var.cloud_armor_login_rate_limit_per_minute
+        interval_sec = 60
+      }
+    }
+
+    description = "Brute-force guard: ${var.cloud_armor_login_rate_limit_per_minute} /api/login attempts/min per client IP"
+  }
+
+  # Throttle/deny clients exceeding the general per-IP rate limit (everything
+  # not matched by the stricter /api/login rule above).
   rule {
     action   = "throttle"
     priority = 1000

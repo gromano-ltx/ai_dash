@@ -30,9 +30,25 @@ variable "session_secret" {
 # ── Cloud Armor (AI-41) ────────────────────────────────────────────────────────
 
 variable "cloud_armor_rate_limit_per_minute" {
-  description = "Max requests allowed per client IP per minute at the Cloud Armor policy in front of the LB, before requests are throttled/denied (AI-41)"
+  description = <<-EOT
+    Max requests allowed per client IP per minute for general dashboard
+    traffic (AI-41). Deliberately generous: the frontend's own TanStack
+    Query polling (/runs every 5s, /stats every 10s, /daily every 30s)
+    already sustains ~20 req/min from a single open tab with zero margin
+    for the initial page load, SSE, or a second person behind the same
+    NAT — a stricter limit here throttles completely normal usage, not
+    abuse. Brute-force protection instead lives in the separate,
+    much stricter `cloud_armor_login_rate_limit_per_minute` rule scoped to
+    /api/login only.
+  EOT
   type        = number
-  default     = 20
+  default     = 300
+}
+
+variable "cloud_armor_login_rate_limit_per_minute" {
+  description = "Max /api/login requests allowed per client IP per minute — the actual brute-force/credential-stuffing guard (AI-41 follow-up). Kept low since a legitimate user never needs more than a handful of login attempts per minute."
+  type        = number
+  default     = 10
 }
 
 variable "lb_domain" {
