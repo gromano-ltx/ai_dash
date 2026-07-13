@@ -268,15 +268,21 @@ def get_stats(
     if user:
         runs = [r for r in runs if r.user == user]
         recent = [r for r in recent if r.user == user]
+    total_input_tokens = sum(r.input_tokens for r in recent)
+    total_output_tokens = sum(r.output_tokens for r in recent)
+    total_prs = sum(len(r.git_prs) for r in recent)
+    total_cost = sum(r.estimated_cost_usd for r in recent if r.estimated_cost_usd is not None)
     return {
         "total_runs_7d": len(recent),
-        "total_input_tokens_7d": sum(r.input_tokens for r in recent),
-        "total_output_tokens_7d": sum(r.output_tokens for r in recent),
+        "total_input_tokens_7d": total_input_tokens,
+        "total_output_tokens_7d": total_output_tokens,
         "total_commits_7d": sum(len(r.git_commits) for r in recent),
-        "total_prs_7d": sum(len(r.git_prs) for r in recent),
-        "total_cost_usd": sum(
-            r.estimated_cost_usd for r in recent if r.estimated_cost_usd is not None
+        "total_prs_7d": total_prs,
+        "total_cost_usd": total_cost,
+        "avg_tokens_per_pr": (
+            (total_input_tokens + total_output_tokens) / total_prs if total_prs else None
         ),
+        "avg_cost_per_pr_usd": (total_cost / total_prs if total_prs else None),
         "days": days,
         "active_providers": list({r.provider for r in recent}),
         "running_count": sum(1 for r in runs if r.status == "running"),

@@ -44,6 +44,8 @@ export interface Stats {
   total_commits_7d: number;
   total_prs_7d: number;
   total_cost_usd: number;
+  avg_tokens_per_pr: number | null;
+  avg_cost_per_pr_usd: number | null;
   active_providers: string[];
   running_count: number;
   by_provider: Record<string, ProviderStats>;
