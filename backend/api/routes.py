@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from backend.db import find_transcript_store, get_session
 from backend.models import AgentRun, AgentRunRead, ApiKey, TranscriptStore, User
 from backend.auth import get_optional_user, require_admin
+from backend import github as github_module
 from backend import sse as sse_bus
 from backend.adapters import claude_code, codex, gemini_cli
 from backend.watcher import _upsert, MIN_TOKENS_TO_PERSIST
@@ -252,6 +253,31 @@ def get_daily(
     return list(buckets.values())
 
 
+def _pr_merge_success_stats(recent: list[AgentRun]) -> dict:
+    """AI-48: merged vs. resolved (merged + closed-unmerged) PR counts for the
+    window, live-looked-up against the GitHub API. Open/pending PRs and PRs
+    whose lookup failed are excluded from both counts — they're neither a
+    success nor a failure yet. Degrades to a null rate (not a crash) when
+    GITHUB_TOKEN isn't configured or no PR resolved either way.
+    """
+    if not github_module.GITHUB_TOKEN:
+        return {"pr_merge_success_rate": None, "pr_merge_success_merged": 0, "pr_merge_success_resolved": 0}
+
+    merged = 0
+    resolved = 0
+    for run in recent:
+        for pr_url in run.git_prs:
+            state = github_module.get_pr_state(pr_url)
+            if state in ("merged", "closed"):
+                resolved += 1
+                if state == "merged":
+                    merged += 1
+            # state is "open" or None (unresolved/lookup failure) — excluded.
+
+    rate = (merged / resolved) if resolved else None
+    return {"pr_merge_success_rate": rate, "pr_merge_success_merged": merged, "pr_merge_success_resolved": resolved}
+
+
 @router.get("/stats")
 def get_stats(
     user: Optional[str] = None,
@@ -295,6 +321,7 @@ def get_stats(
             }
             for p in PROVIDERS
         },
+        **_pr_merge_success_stats(recent),
     }
 
 
